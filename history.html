@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>History — AI Capitalist</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="shared/style.css">
+<style>
+/* Filters */
+.filters {
+  display: flex; gap: 8px; flex-wrap: wrap;
+  align-items: center; margin-bottom: 20px;
+}
+.filter-btn {
+  padding: 5px 12px; border-radius: 20px;
+  font-size: 11px; font-family: var(--font-mono); letter-spacing: 0.5px;
+  border: 1px solid var(--border); background: transparent; color: var(--text-3);
+  cursor: pointer; transition: all 0.15s;
+}
+.filter-btn:hover { border-color: var(--border-hover); color: var(--text-2); }
+.filter-btn.active { border-color: rgba(108,78,200,0.4); color: var(--accent); background: var(--accent-dim); }
+.filter-search {
+  margin-left: auto; max-width: 200px;
+  padding: 5px 12px; font-size: 12px;
+}
+
+/* Table */
+.history-table { width: 100%; border-collapse: collapse; }
+.history-table th {
+  text-align: left; padding: 8px 12px;
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: 1.5px;
+  text-transform: uppercase; color: var(--text-3); border-bottom: 1px solid var(--border);
+  white-space: nowrap; cursor: pointer; user-select: none;
+}
+.history-table th:hover { color: var(--text-2); }
+.history-table th .sort-arrow { margin-left: 4px; opacity: 0.4; }
+.history-table th.sorted .sort-arrow { opacity: 1; color: var(--accent); }
+.history-table td {
+  padding: 11px 12px; border-bottom: 1px solid var(--border);
+  font-size: 12px; color: var(--text-2); vertical-align: middle;
+}
+.history-table tr:hover td { background: var(--surface); }
+.history-table tr { cursor: pointer; }
+.name-cell { font-size: 13px; color: var(--text-1); font-weight: 400; }
+.score-cell {
+  font-family: var(--font-display); font-weight: 700; font-size: 14px;
+  text-align: right;
+}
+.actions-cell { text-align: right; white-space: nowrap; }
+
+/* Modal */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(22,16,46,0.55);
+  backdrop-filter: blur(6px); z-index: 200;
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 40px 16px; overflow-y: auto;
+  opacity: 0; pointer-events: none; transition: opacity 0.2s;
+}
+.modal-overlay.open { opacity: 1; pointer-events: all; }
+.modal {
+  background: var(--bg-2); border: 1px solid var(--border);
+  border-radius: var(--radius); width: 100%; max-width: 760px;
+  padding: 24px; position: relative;
+  transform: translateY(12px); transition: transform 0.2s;
+}
+.modal-overlay.open .modal { transform: translateY(0); }
+.modal-close {
+  position: absolute; top: 14px; right: 14px;
+  width: 28px; height: 28px; border-radius: var(--radius-sm);
+  background: var(--surface); border: 1px solid var(--border);
+  color: var(--text-3); cursor: pointer; font-size: 14px;
+  display: flex; align-items: center; justify-content: center;
+}
+.modal-close:hover { color: var(--text-1); border-color: var(--border-hover); }
+
+.summary-grid {
+  display: grid; gap: 16px; margin: 16px 0;
+  grid-template-columns: 1fr 1fr;
+}
+@media(max-width:520px) { .summary-grid { grid-template-columns: 1fr; } }
+.summary-box {
+  padding: 14px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--surface);
+}
+.summary-box-label { font-family: var(--font-mono); font-size: 10px; color: var(--text-3); letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 6px; }
+.summary-box-text { font-size: 12px; color: var(--text-2); line-height: 1.5; }
+</style>
+<link rel="manifest" href="manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="AI Capitalist">
+<meta name="theme-color" content="#6c4ec8">
+</head>
+<body>
+<div class="page">
+
+  <nav class="nav">
+    <a href="index.html" class="nav-brand">
+      <span class="nav-dot"></span>
+      AI CAPITALIST
+    </a>
+    <div class="nav-links">
+      <a href="index.html"      class="nav-link">Hub</a>
+      <a href="capitalist.html" class="nav-link">Analyse</a>
+      <a href="history.html"    class="nav-link active">History</a>
+      <a href="settings.html"   class="nav-link">Settings</a>
+    </div>
+    <div class="nav-actions">
+      <button class="btn btn-ghost btn-sm" onclick="exportHistory()">Export</button>
+    </div>
+  </nav>
+
+  <div class="main">
+    <div style="margin-bottom:20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <div>
+        <h1 style="font-family:var(--font-display);font-weight:800;font-size:22px;">History</h1>
+        <p class="text-muted text-sm" style="margin-top:4px" id="historyCount">Loading...</p>
+      </div>
+      <button class="btn btn-ghost btn-sm" style="margin-left:auto;color:var(--red)" onclick="clearHistory()">Clear All</button>
+    </div>
+
+    <!-- Filters -->
+    <div class="filters">
+      <button class="filter-btn active" data-filter="all" onclick="setFilter('all', this)">All</button>
+      <button class="filter-btn" data-filter="private" onclick="setFilter('private', this)">🚀 Private</button>
+      <button class="filter-btn" data-filter="public"  onclick="setFilter('public',  this)">📈 Public</button>
+      <button class="filter-btn" data-filter="sme"     onclick="setFilter('sme',     this)">🏢 SME</button>
+      <button class="filter-btn" data-filter="buy"     onclick="setFilter('buy',     this)">Buy Signals</button>
+      <input type="text" id="searchInput" class="filter-search" placeholder="Search..." oninput="applyFilters()">
+    </div>
+
+    <!-- Table -->
+    <div style="overflow-x:auto">
+      <table class="history-table" id="historyTable">
+        <thead>
+          <tr>
+            <th onclick="sortBy('name')">Company <span class="sort-arrow">↕</span></th>
+            <th onclick="sortBy('mode')">Mode <span class="sort-arrow">↕</span></th>
+            <th onclick="sortBy('verdict')">Verdict <span class="sort-arrow">↕</span></th>
+            <th onclick="sortBy('score')" class="sorted">Score <span class="sort-arrow">↓</span></th>
+            <th onclick="sortBy('savedAt')">Date <span class="sort-arrow">↕</span></th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="historyBody"></tbody>
+      </table>
+    </div>
+    <div id="emptyHistory" class="hidden" style="text-align:center;padding:48px;color:var(--text-3)">
+      <div style="font-size:32px;margin-bottom:12px">📋</div>
+      <div style="font-size:14px;color:var(--text-2)">No analyses yet</div>
+      <a href="capitalist.html" style="color:var(--accent);text-decoration:none;font-size:13px;margin-top:8px;display:block">Run your first analysis →</a>
+    </div>
+
+  </div>
+</div>
+
+<!-- Modal -->
+<div class="modal-overlay" id="modal" onclick="closeModal(event)">
+  <div class="modal" id="modalInner">
+    <button class="modal-close" onclick="closeModal(null, true)">✕</button>
+    <div id="modalContent"></div>
+  </div>
+</div>
+
+<script src="shared/config.js"></script>
+<script src="shared/agents.js"></script>
+<script src="shared/modes.js"></script>
+<script>
+'use strict';
+
+const { loadHistory, md } = window.ConfigModule;
+const { getModeById } = window.ModesModule;
+const { getActiveAgents } = window.AgentsModule;
+
+let allHistory = [];
+let filteredHistory = [];
+let currentFilter = 'all';
+let sortKey = 'savedAt';
+let sortAsc = false;
+
+function init() {
+  allHistory = loadHistory();
+  applyFilters();
+}
+
+function setFilter(f, btn) {
+  currentFilter = f;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  applyFilters();
+}
+
+function applyFilters() {
+  const search = document.getElementById('searchInput').value.toLowerCase();
+  filteredHistory = allHistory.filter(item => {
+    if (currentFilter === 'private' && item.mode !== 'private') return false;
+    if (currentFilter === 'public'  && item.mode !== 'public')  return false;
+    if (currentFilter === 'sme'     && item.mode !== 'sme')     return false;
+    if (currentFilter === 'buy' && !['BUY','STRONG_BUY'].includes(item.verdict)) return false;
+    if (search && !(item.name || '').toLowerCase().includes(search)) return false;
+    return true;
+  });
+  sortHistory();
+  renderTable();
+}
+
+function sortBy(key) {
+  if (sortKey === key) sortAsc = !sortAsc;
+  else { sortKey = key; sortAsc = false; }
+  document.querySelectorAll('.history-table th').forEach(th => th.classList.remove('sorted'));
+  const thIdx = ['name','mode','verdict','score','savedAt'].indexOf(key);
+  const ths = document.querySelectorAll('.history-table th');
+  if (ths[thIdx]) {
+    ths[thIdx].classList.add('sorted');
+    ths[thIdx].querySelector('.sort-arrow').textContent = sortAsc ? '↑' : '↓';
+  }
+  sortHistory();
+  renderTable();
+}
+
+function sortHistory() {
+  filteredHistory.sort((a, b) => {
+    let av = a[sortKey], bv = b[sortKey];
+    if (sortKey === 'score') { av = av ?? 0; bv = bv ?? 0; }
+    else { av = av || ''; bv = bv || ''; }
+    return sortAsc ? (av > bv ? 1 : -1) : (av < bv ? 1 : -1);
+  });
+}
+
+function renderTable() {
+  const tbody = document.getElementById('historyBody');
+  const empty = document.getElementById('emptyHistory');
+  const count = document.getElementById('historyCount');
+
+  count.textContent = `${filteredHistory.length} of ${allHistory.length} analyses`;
+
+  if (!filteredHistory.length) {
+    tbody.innerHTML = '';
+    empty.classList.remove('hidden');
+    return;
+  }
+  empty.classList.add('hidden');
+
+  tbody.innerHTML = filteredHistory.map(item => {
+    const mode = getModeById(item.mode || 'private');
+    const modeClass = { private:'ab-private', public:'ab-public', sme:'ab-sme' }[item.mode] || 'ab-private';
+    const v = item.verdict || '—';
+    const vClass = { STRONG_BUY:'v-sb', BUY:'v-b', WATCH:'v-w', PASS:'v-p', STRONG_PASS:'v-sp' }[v] || '';
+    const score = item.score != null ? item.score : null;
+    const scoreColor = score != null ? (score >= 7 ? 'var(--green)' : score >= 5 ? 'var(--amber)' : 'var(--red)') : 'var(--text-3)';
+    const dateStr = item.savedAt ? new Date(item.savedAt).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' }) : '';
+    return `
+      <tr onclick="openModal('${escAttr(item.id || '')}')">
+        <td class="name-cell">${escHtml(item.name || 'Unknown')}</td>
+        <td><span class="asset-badge ${modeClass}">${mode.icon} ${mode.id.toUpperCase()}</span></td>
+        <td>${v !== '—' ? `<span class="verdict ${vClass}">${v.replace('_',' ')}</span>` : '<span class="text-muted">—</span>'}</td>
+        <td class="score-cell" style="color:${scoreColor}">${score != null ? score : '—'}</td>
+        <td style="color:var(--text-3)">${dateStr}</td>
+        <td class="actions-cell">
+          <button class="btn-icon" title="Open in Analyse" onclick="event.stopPropagation();window.location='capitalist.html?id=${escAttr(item.id || '')}'">↗</button>
+          <button class="btn-icon" title="Delete" onclick="event.stopPropagation();deleteItem('${escAttr(item.id || '')}')">✕</button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function openModal(id) {
+  const item = allHistory.find(h => h.id === id);
+  if (!item) return;
+
+  const mode = getModeById(item.mode || 'private');
+  const modeClass = { private:'ab-private', public:'ab-public', sme:'ab-sme' }[item.mode] || 'ab-private';
+  const v = item.verdict || 'WATCH';
+  const vClass = { STRONG_BUY:'v-sb', BUY:'v-b', WATCH:'v-w', PASS:'v-p', STRONG_PASS:'v-sp' }[v] || 'v-w';
+  const score = item.score != null ? item.score : null;
+  const scoreColor = score != null ? (score >= 7 ? 'var(--green)' : score >= 5 ? 'var(--amber)' : 'var(--red)') : 'var(--text-3)';
+  const dateStr = item.savedAt ? new Date(item.savedAt).toLocaleString('en-US') : '';
+  const synthesis = item.synthesis || {};
+  const risks = Array.isArray(synthesis.key_risks) ? synthesis.key_risks : [];
+
+  document.getElementById('modalContent').innerHTML = `
+    <div style="display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:16px">
+      <div>
+        <div class="text-xs text-muted" style="margin-bottom:3px">${dateStr}</div>
+        <div style="font-family:var(--font-display);font-weight:800;font-size:20px;margin-bottom:6px">${escHtml(item.name || '')}</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <span class="asset-badge ${modeClass}">${mode.icon} ${mode.label.en}</span>
+          <span class="verdict ${vClass}">${v.replace('_',' ')}</span>
+          ${score != null ? `<span style="font-family:var(--font-display);font-weight:700;color:${scoreColor}">${score}/10</span>` : ''}
+        </div>
+      </div>
+      <a href="capitalist.html?id=${escAttr(id)}" class="btn btn-ghost btn-sm" style="margin-left:auto">Open Full →</a>
+    </div>
+
+    ${synthesis.headline ? `<div style="font-size:14px;color:var(--text-2);margin-bottom:16px;padding:12px 14px;background:var(--surface);border-radius:var(--radius-sm);border:1px solid var(--border)">${escHtml(synthesis.headline)}</div>` : ''}
+
+    <div class="summary-grid">
+      ${synthesis.bull_case ? `<div class="summary-box"><div class="summary-box-label">Bull Case</div><div class="summary-box-text">${md(synthesis.bull_case)}</div></div>` : ''}
+      ${synthesis.bear_case ? `<div class="summary-box"><div class="summary-box-label">Bear Case</div><div class="summary-box-text">${md(synthesis.bear_case)}</div></div>` : ''}
+    </div>
+
+    ${synthesis.recommendation ? `
+    <div style="margin-bottom:16px">
+      <div class="text-xs text-muted" style="margin-bottom:8px;letter-spacing:1.5px;text-transform:uppercase">Recommendation</div>
+      <div style="font-size:13px;color:var(--text-1);line-height:1.7">${md(synthesis.recommendation)}</div>
+    </div>` : ''}
+
+    ${risks.length ? `
+    <div style="margin-bottom:16px">
+      <div class="text-xs text-muted" style="margin-bottom:8px;letter-spacing:1.5px;text-transform:uppercase">Key Risks</div>
+      ${risks.map(r => `<div style="display:flex;gap:8px;margin-bottom:5px;font-size:12px;color:var(--text-2)"><span style="color:var(--red)">▲</span>${escHtml(r)}</div>`).join('')}
+    </div>` : ''}
+
+    ${(synthesis.return_bull || synthesis.return_base || synthesis.return_bear) ? `
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      ${synthesis.return_bull ? `<div class="scenario-box"><div class="scenario-label">BULL</div><div class="scenario-value" style="color:var(--green)">${escHtml(synthesis.return_bull)}</div></div>` : ''}
+      ${synthesis.return_base ? `<div class="scenario-box"><div class="scenario-label">BASE</div><div class="scenario-value" style="color:var(--amber)">${escHtml(synthesis.return_base)}</div></div>` : ''}
+      ${synthesis.return_bear ? `<div class="scenario-box"><div class="scenario-label">BEAR</div><div class="scenario-value" style="color:var(--red)">${escHtml(synthesis.return_bear)}</div></div>` : ''}
+    </div>` : ''}
+  `;
+
+  document.getElementById('modal').classList.add('open');
+}
+
+function closeModal(event, force) {
+  if (force || (event && event.target === document.getElementById('modal'))) {
+    document.getElementById('modal').classList.remove('open');
+  }
+}
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(null, true); });
+
+function deleteItem(id) {
+  if (!confirm('Delete this analysis?')) return;
+  allHistory = allHistory.filter(h => h.id !== id);
+  localStorage.setItem('aic_history_v1', JSON.stringify(allHistory));
+  applyFilters();
+}
+
+function clearHistory() {
+  if (!confirm('Delete ALL analysis history?')) return;
+  allHistory = [];
+  localStorage.setItem('aic_history_v1', '[]');
+  applyFilters();
+}
+
+function exportHistory() {
+  const blob = new Blob([JSON.stringify(allHistory, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `aic_history_${Date.now()}.json`;
+  a.click(); URL.revokeObjectURL(url);
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function escAttr(s) {
+  return String(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// Expose scenario-box style for inline use
+const scenarioBoxStyle = '';
+
+init();
+</script>
+<style>
+.scenario-box {
+  padding: 10px 16px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--surface-2);
+  text-align: center; min-width: 90px;
+}
+.scenario-label { font-size: 10px; font-family: var(--font-mono); color: var(--text-3); margin-bottom: 4px; }
+.scenario-value { font-family: var(--font-display); font-weight: 700; font-size: 14px; }
+</style>
+</body>
+</html>

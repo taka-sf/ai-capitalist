@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Settings — AI Capitalist</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="shared/style.css">
+<style>
+.settings-layout { display: grid; gap: 20px; }
+@media(min-width:860px) { .settings-layout { grid-template-columns: 200px 1fr; } }
+
+.settings-nav { display: flex; flex-direction: column; gap: 4px; }
+.snav-item {
+  padding: 9px 14px; border-radius: var(--radius-sm);
+  font-size: 12px; font-family: var(--font-mono); color: var(--text-3);
+  cursor: pointer; border: 1px solid transparent; transition: all 0.15s;
+  background: transparent;
+}
+.snav-item:hover { color: var(--text-2); }
+.snav-item.active { color: var(--accent); border-color: rgba(108,78,200,0.2); background: var(--accent-dim); }
+
+.settings-panel { display: none; }
+.settings-panel.active { display: block; }
+
+.section-block { margin-bottom: 28px; }
+.section-block-title {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: 2px;
+  text-transform: uppercase; color: var(--text-3); margin-bottom: 14px;
+  padding-bottom: 8px; border-bottom: 1px solid var(--border);
+}
+
+/* Agent editor */
+.agent-editor {
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface); margin-bottom: 10px; overflow: hidden;
+}
+.agent-editor-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; cursor: pointer;
+  border-bottom: 1px solid transparent; transition: border-color 0.15s;
+}
+.agent-editor-header:hover { background: var(--surface-2); }
+.agent-editor-body { padding: 14px; border-top: 1px solid var(--border); display: none; }
+.agent-editor-body.open { display: block; }
+
+/* Mode editor */
+.mode-editor {
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface); margin-bottom: 10px; overflow: hidden;
+}
+.mode-editor-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; cursor: pointer;
+}
+.mode-editor-header:hover { background: var(--surface-2); }
+.mode-editor-body { padding: 14px; border-top: 1px solid var(--border); display: none; }
+.mode-editor-body.open { display: block; }
+
+/* Export section */
+.export-grid { display: grid; gap: 10px; grid-template-columns: 1fr 1fr; }
+@media(max-width:480px) { .export-grid { grid-template-columns: 1fr; } }
+
+.toast {
+  position: fixed; bottom: 24px; right: 24px;
+  background: var(--accent); border: 1px solid rgba(108,78,200,0.3);
+  border-radius: var(--radius-sm); padding: 10px 18px;
+  font-size: 12px; color: #fff; font-family: var(--font-mono);
+  transform: translateY(8px); opacity: 0;
+  transition: all 0.2s; pointer-events: none; z-index: 999;
+  box-shadow: 0 4px 16px rgba(108,78,200,0.3);
+}
+.toast.show { transform: translateY(0); opacity: 1; }
+</style>
+<link rel="manifest" href="manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="AI Capitalist">
+<meta name="theme-color" content="#6c4ec8">
+</head>
+<body>
+<div class="page">
+
+  <nav class="nav">
+    <a href="index.html" class="nav-brand">
+      <span class="nav-dot"></span>
+      AI CAPITALIST
+    </a>
+    <div class="nav-links">
+      <a href="index.html"      class="nav-link">Hub</a>
+      <a href="capitalist.html" class="nav-link">Analyse</a>
+      <a href="history.html"    class="nav-link">History</a>
+      <a href="settings.html"   class="nav-link active">Settings</a>
+    </div>
+  </nav>
+
+  <div class="main">
+    <div style="margin-bottom:20px">
+      <h1 style="font-family:var(--font-display);font-weight:800;font-size:22px;">Settings</h1>
+      <p class="text-muted text-sm" style="margin-top:4px">Configure your investment committee and preferences.</p>
+    </div>
+
+    <div class="settings-layout">
+
+      <!-- Side nav -->
+      <div class="settings-nav">
+        <button class="snav-item active" onclick="showPanel('panelGeneral', this)">General</button>
+        <button class="snav-item" onclick="showPanel('panelAgents', this)">Agents</button>
+        <button class="snav-item" onclick="showPanel('panelModes', this)">Modes</button>
+        <button class="snav-item" onclick="showPanel('panelExport', this)">Export / Import</button>
+      </div>
+
+      <!-- Panels -->
+      <div>
+
+        <!-- ── General ── -->
+        <div id="panelGeneral" class="settings-panel active">
+          <div class="section-block">
+            <div class="section-block-title">API Configuration</div>
+            <div class="field">
+              <label class="field-label">Anthropic API Key</label>
+              <input type="password" id="apiKey" placeholder="sk-ant-...">
+              <div class="text-xs text-muted" style="margin-top:5px">Stored in localStorage. Never sent to any server except api.anthropic.com.</div>
+            </div>
+            <div class="field">
+              <label class="field-label">Model</label>
+              <select id="model">
+                <option value="claude-sonnet-4-5">claude-sonnet-4-5 (Recommended)</option>
+                <option value="claude-opus-4-5">claude-opus-4-5 (Higher quality, slower)</option>
+                <option value="claude-haiku-4-5">claude-haiku-4-5 (Fast, lower quality)</option>
+              </select>
+            </div>
+            <div class="field">
+              <div class="toggle-wrap" onclick="toggleSetting('webSearch')">
+                <div class="toggle" id="toggle_webSearch"><div class="toggle-thumb"></div></div>
+                <div>
+                  <div style="font-size:13px;color:var(--text-1)">Web Search</div>
+                  <div class="text-xs text-muted">Enable Claude web search during research phase</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="section-block">
+            <div class="section-block-title">Display</div>
+            <div class="field">
+              <label class="field-label">Language</label>
+              <select id="language">
+                <option value="auto">Auto-detect (recommended)</option>
+                <option value="en">English</option>
+                <option value="ja">Japanese</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="section-block">
+            <div class="section-block-title">Integrations (Optional)</div>
+            <div class="field">
+              <label class="field-label">Notion Token</label>
+              <input type="password" id="notionToken" placeholder="secret_...">
+            </div>
+            <div class="field">
+              <label class="field-label">Notion Database ID</label>
+              <input type="text" id="notionDbId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+              <div class="text-xs text-muted" style="margin-top:5px">When set, analyses are auto-saved to Notion.</div>
+            </div>
+          </div>
+
+          <div id="generalSaveArea" style="display:flex;gap:10px;">
+            <button class="btn btn-primary" onclick="saveGeneral(false)" style="flex:1">Save</button>
+            <button class="btn btn-primary" onclick="saveGeneral(true)" style="flex:2">Save &amp; Start Analysing →</button>
+          </div>
+        </div>
+
+        <!-- ── Agents ── -->
+        <div id="panelAgents" class="settings-panel">
+          <div class="section-block">
+            <div class="section-block-title">Investment Committee</div>
+            <p class="text-sm text-muted" style="margin-bottom:16px">Each agent provides a distinct perspective. Disable agents to exclude from the debate.</p>
+            <div id="agentEditors"></div>
+            <div style="display:flex;gap:8px;margin-top:14px">
+              <button class="btn btn-ghost btn-sm" onclick="saveAgentsSettings()">Save Agents</button>
+              <button class="btn btn-ghost btn-sm" style="color:var(--text-3)" onclick="resetAgentsDefaults()">Reset to Defaults</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── Modes ── -->
+        <div id="panelModes" class="settings-panel">
+          <div class="section-block">
+            <div class="section-block-title">Asset Modes</div>
+            <p class="text-sm text-muted" style="margin-bottom:16px">Each mode defines research sections, return metrics, and agent guidance.</p>
+            <div id="modeEditors"></div>
+            <div style="display:flex;gap:8px;margin-top:14px">
+              <button class="btn btn-ghost btn-sm" onclick="saveModesSettings()">Save Modes</button>
+              <button class="btn btn-ghost btn-sm" style="color:var(--text-3)" onclick="resetModesDefaults()">Reset to Defaults</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── Export / Import ── -->
+        <div id="panelExport" class="settings-panel">
+          <div class="section-block">
+            <div class="section-block-title">Export</div>
+            <div class="export-grid">
+              <button class="btn btn-ghost" onclick="exportData('config')">Export Config</button>
+              <button class="btn btn-ghost" onclick="exportData('agents')">Export Agents</button>
+              <button class="btn btn-ghost" onclick="exportData('modes')">Export Modes</button>
+              <button class="btn btn-ghost" onclick="exportData('history')">Export History</button>
+            </div>
+          </div>
+          <div class="section-block">
+            <div class="section-block-title">Import</div>
+            <div class="drop-zone" id="dropZone">
+              <input type="file" accept=".json" onchange="importFile(this)">
+              <div class="text-sm text-muted">Drop a JSON config file here or click to browse</div>
+            </div>
+          </div>
+          <div class="section-block">
+            <div class="section-block-title">Danger Zone</div>
+            <button class="btn btn-danger btn-sm" onclick="clearAll()">Clear All Data</button>
+            <div class="text-xs text-muted" style="margin-top:6px">Removes all localStorage data including API key, history, and settings.</div>
+          </div>
+        </div>
+
+      </div><!-- /panels -->
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="shared/config.js"></script>
+<script src="shared/agents.js"></script>
+<script src="shared/modes.js"></script>
+<script>
+'use strict';
+
+const { loadConfig, saveConfig } = window.ConfigModule;
+const { loadAgents, saveAgents, resetAgents, DEFAULT_AGENTS } = window.AgentsModule;
+const { loadModes, saveModes, resetModes, DEFAULT_MODES } = window.ModesModule;
+
+let agentsDraft = [];
+let modesDraft = [];
+
+// ── Init ──────────────────────────────────────────────
+function init() {
+  const cfg = loadConfig();
+  document.getElementById('apiKey').value = cfg.apiKey || '';
+  document.getElementById('model').value = cfg.model || 'claude-sonnet-4-5';
+  document.getElementById('language').value = cfg.language || 'auto';
+  document.getElementById('notionToken').value = cfg.notionToken || '';
+  document.getElementById('notionDbId').value = cfg.notionDbId || '';
+  setToggle('webSearch', cfg.webSearch !== false);
+
+  agentsDraft = loadAgents();
+  modesDraft = loadModes();
+
+  renderAgentEditors();
+  renderModeEditors();
+}
+
+// ── Panel navigation ──────────────────────────────────
+function showPanel(id, btn) {
+  document.querySelectorAll('.settings-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.snav-item').forEach(b => b.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  btn.classList.add('active');
+}
+
+// ── Toggle ────────────────────────────────────────────
+const toggleState = {};
+function setToggle(key, val) {
+  toggleState[key] = val;
+  const el = document.getElementById('toggle_' + key);
+  if (el) el.classList.toggle('on', val);
+}
+function toggleSetting(key) {
+  setToggle(key, !toggleState[key]);
+}
+
+// ── General ───────────────────────────────────────────
+function saveGeneral(redirect) {
+  const apiKey = document.getElementById('apiKey').value.trim();
+  if (!apiKey) {
+    showInlineError('APIキーを入力してください（sk-ant-...）');
+    document.getElementById('apiKey').focus();
+    return;
+  }
+  const cfg = {
+    apiKey,
+    model: document.getElementById('model').value,
+    language: document.getElementById('language').value,
+    webSearch: toggleState['webSearch'] !== false,
+    notionToken: document.getElementById('notionToken').value.trim(),
+    notionDbId: document.getElementById('notionDbId').value.trim(),
+    gdriveEnabled: false
+  };
+  saveConfig(cfg);
+  hideInlineError();
+  if (redirect) {
+    toast('Saved! Redirecting...');
+    setTimeout(() => { window.location.href = 'capitalist.html'; }, 600);
+  } else {
+    toast('Settings saved');
+  }
+}
+
+function showInlineError(msg) {
+  let el = document.getElementById('generalError');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'generalError';
+    el.className = 'error-box';
+    el.style.marginTop = '10px';
+    document.getElementById('generalSaveArea').appendChild(el);
+  }
+  el.textContent = msg;
+  el.classList.remove('hidden');
+}
+function hideInlineError() {
+  const el = document.getElementById('generalError');
+  if (el) el.classList.add('hidden');
+}
+
+// ── Agents ────────────────────────────────────────────
+function renderAgentEditors() {
+  const el = document.getElementById('agentEditors');
+  el.innerHTML = agentsDraft.map((agent, idx) => `
+    <div class="agent-editor">
+      <div class="agent-editor-header" onclick="toggleAgentEditor(${idx})">
+        <span>${agent.emoji}</span>
+        <span style="font-size:13px;color:var(--text-1)">${agent.name.en}</span>
+        <span class="text-xs text-muted" style="margin-left:4px">${agent.role.en}</span>
+        <div style="margin-left:auto">
+          <div class="toggle ${agent.enabled ? 'on' : ''}" id="agentToggle_${idx}" onclick="event.stopPropagation();toggleAgent(${idx})">
+            <div class="toggle-thumb"></div>
+          </div>
+        </div>
+      </div>
+      <div class="agent-editor-body" id="agentBody_${idx}">
+        <div class="field">
+          <label class="field-label">Persona / System Prompt</label>
+          <textarea id="agentPersona_${idx}" rows="4" style="font-size:12px;font-family:var(--font-mono)">${escHtml(agent.persona || '')}</textarea>
+        </div>
+        <div class="field">
+          <label class="field-label">Private Equity Override</label>
+          <textarea id="agentPrivate_${idx}" rows="2" style="font-size:12px;font-family:var(--font-mono)">${escHtml(agent.modeOverrides?.private || '')}</textarea>
+        </div>
+        <div class="field">
+          <label class="field-label">Public Equity Override</label>
+          <textarea id="agentPublic_${idx}" rows="2" style="font-size:12px;font-family:var(--font-mono)">${escHtml(agent.modeOverrides?.public || '')}</textarea>
+        </div>
+        <div class="field">
+          <label class="field-label">SME Override</label>
+          <textarea id="agentSme_${idx}" rows="2" style="font-size:12px;font-family:var(--font-mono)">${escHtml(agent.modeOverrides?.sme || '')}</textarea>
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function toggleAgentEditor(idx) {
+  const body = document.getElementById('agentBody_' + idx);
+  body.classList.toggle('open');
+}
+
+function toggleAgent(idx) {
+  agentsDraft[idx].enabled = !agentsDraft[idx].enabled;
+  const toggleEl = document.getElementById('agentToggle_' + idx);
+  if (toggleEl) toggleEl.classList.toggle('on', agentsDraft[idx].enabled);
+}
+
+function saveAgentsSettings() {
+  agentsDraft.forEach((agent, idx) => {
+    const p = document.getElementById('agentPersona_' + idx);
+    const priv = document.getElementById('agentPrivate_' + idx);
+    const pub = document.getElementById('agentPublic_' + idx);
+    const sme = document.getElementById('agentSme_' + idx);
+    if (p) agent.persona = p.value;
+    if (!agent.modeOverrides) agent.modeOverrides = {};
+    if (priv) agent.modeOverrides.private = priv.value;
+    if (pub)  agent.modeOverrides.public  = pub.value;
+    if (sme)  agent.modeOverrides.sme     = sme.value;
+  });
+  saveAgents(agentsDraft);
+  toast('Agents saved');
+}
+
+function resetAgentsDefaults() {
+  if (!confirm('Reset all agents to defaults?')) return;
+  agentsDraft = resetAgents();
+  renderAgentEditors();
+  toast('Agents reset to defaults');
+}
+
+// ── Modes ─────────────────────────────────────────────
+function renderModeEditors() {
+  const el = document.getElementById('modeEditors');
+  el.innerHTML = modesDraft.map((mode, midx) => `
+    <div class="mode-editor">
+      <div class="mode-editor-header" onclick="toggleModeEditor(${midx})">
+        <span style="font-size:18px">${mode.icon}</span>
+        <span style="font-size:13px;color:var(--text-1)">${mode.label.en}</span>
+        <span class="text-xs text-muted" style="margin-left:auto">${mode.returnMetric}</span>
+      </div>
+      <div class="mode-editor-body" id="modeBody_${midx}">
+        <div class="field">
+          <label class="field-label">Agent Guidance</label>
+          <textarea id="modeGuidance_${midx}" rows="2" style="font-size:12px;font-family:var(--font-mono)">${escHtml(mode.agentGuidance || '')}</textarea>
+        </div>
+        <div class="field">
+          <label class="field-label">Research Sections</label>
+          <div>
+            ${mode.researchSections.map((s, sidx) => `
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+                <input type="checkbox" id="sec_${midx}_${sidx}" ${s.enabled ? 'checked' : ''}
+                  onchange="toggleSection(${midx},${sidx},this.checked)" style="width:auto;accent-color:var(--accent)">
+                <label for="sec_${midx}_${sidx}" style="font-size:12px;color:var(--text-2);cursor:pointer">${s.label.en}</label>
+                <span class="text-xs text-muted" style="margin-left:auto">weight ${s.weight}</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function toggleModeEditor(midx) {
+  document.getElementById('modeBody_' + midx).classList.toggle('open');
+}
+
+function toggleSection(midx, sidx, val) {
+  modesDraft[midx].researchSections[sidx].enabled = val;
+}
+
+function saveModesSettings() {
+  modesDraft.forEach((mode, midx) => {
+    const g = document.getElementById('modeGuidance_' + midx);
+    if (g) mode.agentGuidance = g.value;
+  });
+  saveModes(modesDraft);
+  toast('Modes saved');
+}
+
+function resetModesDefaults() {
+  if (!confirm('Reset all modes to defaults?')) return;
+  modesDraft = resetModes();
+  renderModeEditors();
+  toast('Modes reset to defaults');
+}
+
+// ── Export / Import ───────────────────────────────────
+function exportData(type) {
+  const data = {
+    config:  () => loadConfig(),
+    agents:  () => loadAgents(),
+    modes:   () => loadModes(),
+    history: () => { try { return JSON.parse(localStorage.getItem('aic_history_v1') || '[]'); } catch(e) { return []; } }
+  }[type]();
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `aic_${type}_${Date.now()}.json`;
+  a.click(); URL.revokeObjectURL(url);
+}
+
+function importFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (data.apiKey !== undefined) { saveConfig(data); toast('Config imported'); init(); }
+      else if (Array.isArray(data) && data[0]?.id && data[0]?.persona) { saveAgents(data); agentsDraft = data; renderAgentEditors(); toast('Agents imported'); }
+      else if (Array.isArray(data) && data[0]?.researchSections) { saveModes(data); modesDraft = data; renderModeEditors(); toast('Modes imported'); }
+      else if (Array.isArray(data) && data[0]?.savedAt) { localStorage.setItem('aic_history_v1', JSON.stringify(data)); toast('History imported'); }
+      else { toast('Unknown file format'); }
+    } catch(err) { toast('Import failed: invalid JSON'); }
+  };
+  reader.readAsText(file);
+}
+
+function clearAll() {
+  if (!confirm('Delete ALL data including API key and history? This cannot be undone.')) return;
+  ['aic_config_v1','aic_agents_v1','aic_modes_v1','aic_history_v1'].forEach(k => localStorage.removeItem(k));
+  toast('All data cleared');
+  setTimeout(() => location.reload(), 800);
+}
+
+// ── Toast ─────────────────────────────────────────────
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 2400);
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+init();
+</script>
+</body>
+</html>
