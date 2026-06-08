@@ -11,6 +11,7 @@ const DEFAULT_CONFIG = {
   notionToken:   '',
   notionDbId:    '',
   gdriveEnabled: false,
+  gasUrl:    '',   // GAS Web App URL for cross-device sync
 };
 
 function loadConfig() {
@@ -156,18 +157,111 @@ async function callClaude({ prompt, system, useSearch = false, maxTokens = 1400 
   throw new Error('Max tool loop iterations reached. Please try again.');
 }
 
-// ── History ───────────────────────────────────────────
+// ── History (localStorage + optional GAS cloud sync) ─────────────────────
+const HISTORY_KEY = 'aic_history_v1';
+
+/** Save to localStorage immediately; also push to GAS if configured. */
 function saveAnalysis(result) {
-  const key = 'aic_history_v1';
-  let history = [];
-  try { history = JSON.parse(localStorage.getItem(key) || '[]'); } catch(e) {}
-  history.unshift({ ...result, savedAt: new Date().toISOString() });
-  if (history.length > 100) history = history.slice(0, 100);
-  localStorage.setItem(key, JSON.stringify(history));
+  const entry = { ...result, savedAt: result.savedAt || new Date().toISOString() };
+
+  // 1. Always save locally first (instant, offline-safe)
+  let local = [];
+  try { local = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); } catch(e) {}
+  // Replace existing entry with same id, or prepend
+  const idx = local.findIndex(r => r.id && r.id === entry.id);
+  if (idx >= 0) local[idx] = entry; else local.unshift(entry);
+  if (local.length > 200) local = local.slice(0, 200);
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(local));
+
+  // 2. Push to GAS cloud (non-blocking, errors logged but not thrown)
+  const cfg = loadConfig();
+  if (cfg.gasUrl) {
+    gasPost_(cfg.gasUrl, { action: 'saveAnalysis', data: entry })
+      .catch(e => console.warn('[GAS sync] saveAnalysis failed:', e.message));
+  }
+
+  return entry;
 }
 
-function loadHistory() {
-  try { return JSON.parse(localStorage.getItem('aic_history_v1') || '[]'); } catch(e) { return []; }
+/**
+ * Load history.
+ * - If gasUrl configured: fetch from GAS (cloud-first), merge with local,
+ *   refresh localStorage cache. Falls back to localStorage on network error.
+ * - Returns a Promise that resolves to the history array.
+ */
+async function loadHistory() {
+  const local = loadLocalHistory_();
+  const cfg   = loadConfig();
+  if (!cfg.gasUrl) return local;
+
+  try {
+    const res  = await gasGet_(cfg.gasUrl, { action: 'getHistory', limit: 200 });
+    if (res.ok && Array.isArray(res.history)) {
+      // Merge: cloud is source-of-truth; add any local-only entries not yet synced
+      const cloudIds = new Set(res.history.map(r => r.id));
+      const localOnly = local.filter(r => r.id && !cloudIds.has(r.id));
+      const merged = [...res.history, ...localOnly];
+      // Sort newest-first
+      merged.sort((a, b) => (b.savedAt || '') > (a.savedAt || '') ? 1 : -1);
+      // Refresh cache
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(merged.slice(0, 200)));
+      // Upload any local-only entries to cloud
+      localOnly.forEach(entry => {
+        gasPost_(cfg.gasUrl, { action: 'saveAnalysis', data: entry })
+          .catch(e => console.warn('[GAS sync] upload local-only failed:', e.message));
+      });
+      return merged;
+    }
+  } catch(e) {
+    console.warn('[GAS sync] loadHistory failed, using local cache:', e.message);
+  }
+  return local;
+}
+
+/** Delete a single analysis (local + cloud). */
+async function deleteAnalysis(id) {
+  // Remove from local
+  let local = loadLocalHistory_();
+  local = local.filter(r => r.id !== id);
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(local));
+  // Remove from cloud
+  const cfg = loadConfig();
+  if (cfg.gasUrl) {
+    await gasPost_(cfg.gasUrl, { action: 'deleteAnalysis', id })
+      .catch(e => console.warn('[GAS sync] deleteAnalysis failed:', e.message));
+  }
+}
+
+function loadLocalHistory_() {
+  try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); } catch(e) { return []; }
+}
+
+// ── GAS HTTP helpers ──────────────────────────────────────────────────────
+async function gasPost_(url, body) {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    redirect: 'follow',
+  });
+  if (!res.ok) throw new Error(`GAS HTTP ${res.status}`);
+  return res.json();
+}
+
+async function gasGet_(url, params) {
+  const qs  = new URLSearchParams(params).toString();
+  const res = await fetch(`${url}?${qs}`, { redirect: 'follow' });
+  if (!res.ok) throw new Error(`GAS HTTP ${res.status}`);
+  return res.json();
+}
+
+/** Sync current settings (minus apiKey) to GAS. */
+async function syncConfigToGas(cfg) {
+  if (!cfg.gasUrl) return;
+  const safe = { ...cfg };
+  delete safe.apiKey;
+  await gasPost_(cfg.gasUrl, { action: 'saveConfig', data: safe })
+    .catch(e => console.warn('[GAS sync] saveConfig failed:', e.message));
 }
 
 // ── Markdown → HTML ───────────────────────────────────
@@ -200,7 +294,9 @@ function safeJsonParse(text) {
 if (typeof window !== 'undefined') {
   window.ConfigModule = {
     loadConfig, saveConfig, detectLang, classifyInput,
-    callClaude, saveAnalysis, loadHistory, md, safeJsonParse
+    callClaude, saveAnalysis, loadHistory, deleteAnalysis,
+    syncConfigToGas, gasPost_, gasGet_,
+    md, safeJsonParse
   };
 }
 })();

@@ -207,7 +207,7 @@
   const { loadConfig, loadHistory } = window.ConfigModule;
   const { getModeById } = window.ModesModule;
 
-  function init() {
+  async function init() {
     // API status
     const cfg = loadConfig();
     const statusEl = document.getElementById('apiStatus');
@@ -215,7 +215,7 @@
     statusEl.style.color = cfg.apiKey ? 'var(--green)' : 'var(--red)';
 
     // Stats + recent
-    const history = loadHistory();
+    const history = await loadHistory();
     document.getElementById('statTotal').textContent = history.length;
 
     const buys = history.filter(h => h.verdict && (h.verdict === 'STRONG_BUY' || h.verdict === 'BUY')).length;

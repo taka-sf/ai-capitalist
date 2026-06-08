@@ -156,6 +156,30 @@
           </div>
 
           <div class="section-block">
+            <div class="section-block-title">Cloud Sync — Google Sheets (Optional)</div>
+            <div class="field">
+              <label class="field-label">GAS Web App URL</label>
+              <input type="url" id="gasUrl" placeholder="https://script.google.com/macros/s/…/exec">
+              <div class="text-xs text-muted" style="margin-top:5px">
+                Analysis history is synced across all devices via Google Sheets.
+                APIキーはデバイスに残り、クラウドには送信されません。
+                <a href="#" onclick="showGasHelp();return false;" style="color:var(--accent)">設定手順を見る</a>
+              </div>
+            </div>
+            <div id="gasHelpBox" style="display:none;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:14px;font-size:12px;color:var(--text-2);line-height:1.8;margin-top:4px">
+              <strong style="color:var(--text-1)">GAS Web App の設定手順：</strong><br>
+              1. Google Apps Script (<a href="https://script.google.com" target="_blank" style="color:var(--accent)">script.google.com</a>) を開く<br>
+              2. AI AM System の GAS プロジェクトを開く（または新規プロジェクト）<br>
+              3. <code style="background:var(--surface);padding:1px 4px;border-radius:3px">12_capitalist_db.gs</code> が含まれていることを確認<br>
+              4. 「デプロイ」→「新しいデプロイ」→ 種類: <strong>ウェブアプリ</strong><br>
+              5. 実行ユーザー: <strong>自分</strong> / アクセス: <strong>全員</strong> を選択して「デプロイ」<br>
+              6. 生成された URL をここに貼り付けて保存
+            </div>
+            <div id="gasSyncStatus" style="display:none;margin-top:8px;font-size:12px;font-family:var(--font-mono)"></div>
+            <button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="testGasConnection()">接続テスト</button>
+          </div>
+
+          <div class="section-block">
             <div class="section-block-title">Integrations (Optional)</div>
             <div class="field">
               <label class="field-label">Notion Token</label>
@@ -238,7 +262,7 @@
 <script>
 'use strict';
 
-const { loadConfig, saveConfig } = window.ConfigModule;
+const { loadConfig, saveConfig, syncConfigToGas, gasGet_ } = window.ConfigModule;
 const { loadAgents, saveAgents, resetAgents, DEFAULT_AGENTS } = window.AgentsModule;
 const { loadModes, saveModes, resetModes, DEFAULT_MODES } = window.ModesModule;
 
@@ -251,6 +275,7 @@ function init() {
   document.getElementById('apiKey').value = cfg.apiKey || '';
   document.getElementById('model').value = cfg.model || 'claude-sonnet-4-5';
   document.getElementById('language').value = cfg.language || 'auto';
+  document.getElementById('gasUrl').value = cfg.gasUrl || '';
   document.getElementById('notionToken').value = cfg.notionToken || '';
   document.getElementById('notionDbId').value = cfg.notionDbId || '';
   setToggle('webSearch', cfg.webSearch !== false);
@@ -294,11 +319,14 @@ function saveGeneral(redirect) {
     model: document.getElementById('model').value,
     language: document.getElementById('language').value,
     webSearch: toggleState['webSearch'] !== false,
+    gasUrl: document.getElementById('gasUrl').value.trim(),
     notionToken: document.getElementById('notionToken').value.trim(),
     notionDbId: document.getElementById('notionDbId').value.trim(),
     gdriveEnabled: false
   };
   saveConfig(cfg);
+  // Sync settings (minus apiKey) to GAS if URL is set
+  if (cfg.gasUrl) syncConfigToGas(cfg);
   hideInlineError();
   if (redirect) {
     toast('Saved! Redirecting...');
@@ -498,6 +526,38 @@ function toast(msg) {
   el.textContent = msg;
   el.classList.add('show');
   setTimeout(() => el.classList.remove('show'), 2400);
+}
+
+// ── GAS helpers ───────────────────────────────────────
+function showGasHelp() {
+  const box = document.getElementById('gasHelpBox');
+  box.style.display = box.style.display === 'none' ? 'block' : 'none';
+}
+
+async function testGasConnection() {
+  const url = document.getElementById('gasUrl').value.trim();
+  const statusEl = document.getElementById('gasSyncStatus');
+  statusEl.style.display = 'block';
+  if (!url) {
+    statusEl.style.color = 'var(--red)';
+    statusEl.textContent = '✗ GAS URL が未入力です';
+    return;
+  }
+  statusEl.style.color = 'var(--text-3)';
+  statusEl.textContent = '… 接続確認中';
+  try {
+    const res = await gasGet_(url, { action: 'getHistory', limit: 1 });
+    if (res.ok) {
+      statusEl.style.color = 'var(--green)';
+      const count = res.history ? res.history.length : '?';
+      statusEl.textContent = `✓ 接続OK — Google Sheets に ${count} 件のデータがあります`;
+    } else {
+      throw new Error(res.error || 'Unknown error');
+    }
+  } catch(e) {
+    statusEl.style.color = 'var(--red)';
+    statusEl.textContent = `✗ 接続失敗: ${e.message}`;
+  }
 }
 
 function escHtml(s) {

@@ -171,7 +171,7 @@
 <script>
 'use strict';
 
-const { loadHistory, md } = window.ConfigModule;
+const { loadHistory, deleteAnalysis, md, loadConfig, gasPost_ } = window.ConfigModule;
 const { getModeById } = window.ModesModule;
 const { getActiveAgents } = window.AgentsModule;
 
@@ -181,9 +181,19 @@ let currentFilter = 'all';
 let sortKey = 'savedAt';
 let sortAsc = false;
 
-function init() {
-  allHistory = loadHistory();
+async function init() {
+  // Show local cache instantly, then refresh from cloud
+  const cfg = loadConfig();
+  document.getElementById('historyCount').textContent = 'Loading…';
+  allHistory = await loadHistory();   // returns Promise (cloud-first if gasUrl set)
   applyFilters();
+  // Show sync indicator
+  if (cfg.gasUrl) {
+    const syncEl = document.createElement('span');
+    syncEl.style.cssText = 'margin-left:8px;font-size:11px;font-family:var(--font-mono);color:var(--green)';
+    syncEl.textContent = '● Cloud sync';
+    document.getElementById('historyCount').appendChild(syncEl);
+  }
 }
 
 function setFilter(f, btn) {
@@ -334,17 +344,23 @@ function closeModal(event, force) {
 
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(null, true); });
 
-function deleteItem(id) {
+async function deleteItem(id) {
   if (!confirm('Delete this analysis?')) return;
+  await deleteAnalysis(id);   // removes from localStorage + GAS
   allHistory = allHistory.filter(h => h.id !== id);
-  localStorage.setItem('aic_history_v1', JSON.stringify(allHistory));
   applyFilters();
 }
 
-function clearHistory() {
+async function clearHistory() {
   if (!confirm('Delete ALL analysis history?')) return;
   allHistory = [];
   localStorage.setItem('aic_history_v1', '[]');
+  // Also clear on GAS
+  const cfg = loadConfig();
+  if (cfg.gasUrl) {
+    await gasPost_(cfg.gasUrl, { action: 'clearHistory' })
+      .catch(e => console.warn('GAS clearHistory failed:', e.message));
+  }
   applyFilters();
 }
 
