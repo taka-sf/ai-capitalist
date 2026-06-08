@@ -195,7 +195,7 @@ async function loadHistory() {
   if (!cfg.gasUrl) return local;
 
   try {
-    const res  = await gasGet_(cfg.gasUrl, { action: 'getHistory', limit: 200 });
+    const res  = await gasPost_(cfg.gasUrl, { action: 'getHistory', limit: 200 });
     if (res.ok && Array.isArray(res.history)) {
       // Merge: cloud is source-of-truth; add any local-only entries not yet synced
       const cloudIds = new Set(res.history.map(r => r.id));
@@ -237,22 +237,36 @@ function loadLocalHistory_() {
 }
 
 // ── GAS HTTP helpers ──────────────────────────────────────────────────────
+// GAS Web Apps redirect (302) to the actual execution URL.
+// Browsers follow redirects automatically but CORS headers are lost on the
+// redirect target unless "redirect: follow" + no preflight is used.
+// Workaround: send everything as POST with action in the body (avoids
+// preflight for GETs with custom params), OR use no-cors for GETs and
+// parse the opaque response — but that returns status 0.
+// Best approach: always POST (GAS doPost handles all actions), and for
+// simple GETs append params to URL and use redirect:follow with no
+// custom Content-Type to avoid preflight.
+
 async function gasPost_(url, body) {
+  // Use text/plain to avoid CORS preflight (GAS doesn't send preflight headers)
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
     body: JSON.stringify(body),
     redirect: 'follow',
   });
   if (!res.ok) throw new Error(`GAS HTTP ${res.status}`);
-  return res.json();
+  const text = await res.text();
+  try { return JSON.parse(text); } catch(e) { throw new Error(`GAS response parse error: ${text.slice(0, 100)}`); }
 }
 
 async function gasGet_(url, params) {
+  // Simple GET — no custom headers avoids preflight
   const qs  = new URLSearchParams(params).toString();
   const res = await fetch(`${url}?${qs}`, { redirect: 'follow' });
   if (!res.ok) throw new Error(`GAS HTTP ${res.status}`);
-  return res.json();
+  const text = await res.text();
+  try { return JSON.parse(text); } catch(e) { throw new Error(`GAS response parse error: ${text.slice(0, 100)}`); }
 }
 
 /** Sync current settings (minus apiKey) to GAS. */

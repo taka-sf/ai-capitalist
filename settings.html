@@ -546,7 +546,8 @@ async function testGasConnection() {
   statusEl.style.color = 'var(--text-3)';
   statusEl.textContent = '… 接続確認中';
   try {
-    const res = await gasGet_(url, { action: 'getHistory', limit: 1 });
+    // Use POST to avoid CORS preflight issues with GAS redirects
+    const res = await gasPost_(url, { action: 'getHistory', limit: 1 });
     if (res.ok) {
       statusEl.style.color = 'var(--green)';
       const count = res.history ? res.history.length : '?';
