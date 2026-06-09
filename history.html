@@ -186,11 +186,19 @@ async function init() {
   const cfg = loadConfig();
   document.getElementById('historyCount').textContent = 'Loading…';
   const raw = await loadHistory();   // returns Promise (cloud-first if gasUrl set)
-  // Deduplicate by id client-side as final safety net
-  const seen = new Set();
+  // Deduplicate: by ID first, then by content-signature (name+mode+verdict+score+minute)
+  const seenId  = new Set();
+  const seenSig = new Set();
   allHistory = raw.filter(item => {
-    if (!item?.id || seen.has(item.id)) return false;
-    seen.add(item.id);
+    if (!item) return false;
+    if (item.id) {
+      if (seenId.has(item.id)) return false;
+      seenId.add(item.id);
+    }
+    const minute = (item.savedAt || '').slice(0, 16);
+    const sig = `${item.name}|${item.mode}|${item.verdict}|${item.score}|${minute}`;
+    if (seenSig.has(sig)) return false;
+    seenSig.add(sig);
     return true;
   });
   applyFilters();

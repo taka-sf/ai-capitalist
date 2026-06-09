@@ -167,18 +167,19 @@ function saveAnalysis(result) {
   // 1. Always save locally first (instant, offline-safe)
   let local = [];
   try { local = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); } catch(e) {}
-  // Replace existing entry with same id, or prepend (deduplicate by id)
+  // Replace existing entry with same id, or prepend
   const idx = local.findIndex(r => r.id && r.id === entry.id);
   if (idx >= 0) { local[idx] = entry; } else { local.unshift(entry); }
-  // Remove any stale entries with same name+mode saved within 60 seconds (double-save guard)
-  const cutoff = new Date(entry.savedAt).getTime() - 60000;
+  // Remove any near-duplicate entries: same name+mode+verdict+score saved within 5 minutes
+  const newTime = new Date(entry.savedAt).getTime();
   local = local.filter((r, i) => {
-    if (i === 0) return true; // keep the new entry
+    if (i === 0) return true; // always keep the just-added entry (index 0 after unshift)
+    if (r.id && r.id === entry.id) return false; // same ID already handled above → remove old position
     const rTime = new Date(r.savedAt || 0).getTime();
-    const isDupe = r.name === entry.name && r.mode === entry.mode &&
-                   r.verdict === entry.verdict && String(r.score) === String(entry.score) &&
-                   rTime > cutoff;
-    return !isDupe;
+    const withinWindow = Math.abs(rTime - newTime) < 5 * 60 * 1000; // 5-minute window
+    const sameContent  = r.name === entry.name && r.mode === entry.mode &&
+                         r.verdict === entry.verdict && String(r.score) === String(entry.score);
+    return !(withinWindow && sameContent);
   });
   if (local.length > 200) local = local.slice(0, 200);
   localStorage.setItem(HISTORY_KEY, JSON.stringify(local));
@@ -228,14 +229,25 @@ async function loadHistory() {
   return dedupeHistory_(local);
 }
 
-/** Remove exact duplicate entries (same id, or same name+mode+verdict+score saved within 5 minutes) */
+/** Remove duplicate entries.
+ *  Priority 1: exact id match.
+ *  Priority 2: same name + mode + verdict + score + savedAt (to the minute) → content-hash dedup.
+ */
 function dedupeHistory_(arr) {
-  const seen = new Map();
+  const seenId  = new Set();
+  const seenSig = new Set();
   return arr.filter(item => {
     if (!item) return false;
-    // Primary key: exact id
-    if (item.id && seen.has(item.id)) return false;
-    if (item.id) seen.set(item.id, true);
+    // 1. ID dedup
+    if (item.id) {
+      if (seenId.has(item.id)) return false;
+      seenId.add(item.id);
+    }
+    // 2. Content-signature dedup (same analysis saved twice with different IDs)
+    const minute = (item.savedAt || '').slice(0, 16); // "2025-06-09T20:42"
+    const sig = `${item.name}|${item.mode}|${item.verdict}|${item.score}|${minute}`;
+    if (seenSig.has(sig)) return false;
+    seenSig.add(sig);
     return true;
   });
 }
