@@ -652,7 +652,23 @@ function init() {
     selectMode(autoMode || 'private');
   }
   if (params.get('mode')) selectMode(params.get('mode'));
-  if (params.get('id')) loadExistingResult(params.get('id'));
+  if (params.get('id')) {
+    loadExistingResult(params.get('id'));
+  } else {
+    // Restore last result on refresh (no ?id= param)
+    try {
+      const last = localStorage.getItem('capitalist_lastResult');
+      if (last) {
+        const item = JSON.parse(last);
+        if (item && item.name) {
+          document.getElementById('targetInput').value = item.name || '';
+          selectMode(item.mode || 'private');
+          const mode = getModeById(item.mode || 'private');
+          renderResults(item.name, mode, item.research || {}, item.debate || {}, item.synthesis || {});
+        }
+      }
+    } catch(e) {}
+  }
 }
 
 function selectMode(id) {
@@ -768,7 +784,7 @@ async function startAnalysis() {
 
     // Render & save
     renderResults(target, finalMode, researchData, debateResults, synthesis);
-    saveAnalysis({
+    const analysisRecord = {
       id: Date.now().toString(),
       name: target,
       mode: finalMode.id,
@@ -778,7 +794,10 @@ async function startAnalysis() {
       debate: debateResults,
       synthesis,
       savedAt: new Date().toISOString()
-    });
+    };
+    saveAnalysis(analysisRecord);
+    // Persist last result so page refresh restores it
+    try { localStorage.setItem('capitalist_lastResult', JSON.stringify(analysisRecord)); } catch(e) {}
 
   } catch(err) {
     showError(err.message || 'Analysis failed. Please try again.');
@@ -1123,7 +1142,7 @@ function renderResults(target, mode, research, debate, synthesis) {
     ${research.description ? `
     <div class="synthesis-section">
       <div class="synth-label">Company Overview</div>
-      <div class="synth-body" style="font-size:12px;color:var(--text-2)">${md(cleanSynth(research.description))}</div>
+      <div class="synth-body" style="font-size:12px;color:var(--text-2)">${md(cleanField(research.description, 'description'))}</div>
     </div>` : ''}
   `;
 
