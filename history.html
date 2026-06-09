@@ -185,7 +185,14 @@ async function init() {
   // Show local cache instantly, then refresh from cloud
   const cfg = loadConfig();
   document.getElementById('historyCount').textContent = 'Loading…';
-  allHistory = await loadHistory();   // returns Promise (cloud-first if gasUrl set)
+  const raw = await loadHistory();   // returns Promise (cloud-first if gasUrl set)
+  // Deduplicate by id client-side as final safety net
+  const seen = new Set();
+  allHistory = raw.filter(item => {
+    if (!item?.id || seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  });
   applyFilters();
   // Show sync indicator
   if (cfg.gasUrl) {
@@ -261,7 +268,7 @@ function renderTable() {
     const vClass = { STRONG_BUY:'v-sb', BUY:'v-b', WATCH:'v-w', PASS:'v-p', STRONG_PASS:'v-sp' }[v] || '';
     const score = item.score != null ? item.score : null;
     const scoreColor = score != null ? (score >= 7 ? 'var(--green)' : score >= 5 ? 'var(--amber)' : 'var(--red)') : 'var(--text-3)';
-    const dateStr = item.savedAt ? new Date(item.savedAt).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' }) : '';
+    const dateStr = item.savedAt ? new Date(item.savedAt).toLocaleString('ja-JP', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }).replace(/\//g,'/') : '';
     return `
       <tr onclick="openModal('${escAttr(item.id || '')}')">
         <td class="name-cell">${escHtml(item.name || 'Unknown')}</td>
@@ -288,7 +295,7 @@ function openModal(id) {
   const vClass = { STRONG_BUY:'v-sb', BUY:'v-b', WATCH:'v-w', PASS:'v-p', STRONG_PASS:'v-sp' }[v] || 'v-w';
   const score = item.score != null ? item.score : null;
   const scoreColor = score != null ? (score >= 7 ? 'var(--green)' : score >= 5 ? 'var(--amber)' : 'var(--red)') : 'var(--text-3)';
-  const dateStr = item.savedAt ? new Date(item.savedAt).toLocaleString('en-US') : '';
+  const dateStr = item.savedAt ? new Date(item.savedAt).toLocaleString('ja-JP', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }) : '';
   const synthesis = item.synthesis || {};
   const risks = Array.isArray(synthesis.key_risks) ? synthesis.key_risks : [];
 

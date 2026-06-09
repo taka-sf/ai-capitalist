@@ -1,7 +1,7 @@
 (function() {
 'use strict';
 
-const AGENTS_STORAGE_KEY = 'aic_agents_v1';
+const AGENTS_STORAGE_KEY = 'aic_agents_v3';
 
 const DEFAULT_AGENTS = [
   {
@@ -18,6 +18,22 @@ const DEFAULT_AGENTS = [
       private: 'Focus on: founder track record, team composition, product vision, VC signal quality, exit potential. Key question: can this team build a $1B+ company?',
       public:  'Focus on: management quality, capital allocation track record, long-term competitive moat, why this stock is mispriced NOW. Key question: what does the market not see?',
       sme:     'Focus on: owner-operator quality, succession plan, domain expertise depth, local market dominance. Key question: is this a durable business with a trustworthy operator?'
+    }
+  },
+  {
+    id: 'product',
+    emoji: '📱',
+    name: { ja: 'プロダクト評価', en: 'Product Oriented' },
+    role: { ja: 'プロダクト品質・ユーザー評価', en: 'Product Quality & User Reviews' },
+    color: '#06b6d4',
+    bg: 'rgba(6,182,212,0.07)',
+    border: 'rgba(6,182,212,0.22)',
+    enabled: true,
+    persona: 'You are a product-obsessed analyst. Your ONLY evaluation lens is the product/service itself — how real users experience it. You rely exclusively on App Store ratings, Google Play reviews, G2/Capterra/Trustpilot scores, Reddit threads, customer testimonials, NPS data, and third-party product review sites. You do not care about financials, market size, or management quality — only whether the product genuinely delights or frustrates its users.',
+    modeOverrides: {
+      private: 'Focus on: App Store / Play Store ratings and review sentiment, G2/Product Hunt/TechCrunch coverage quality, community feedback (Reddit, Twitter/X), feature completeness vs competitors, onboarding friction, retention signals from product reviews. Key question: do real users love this product enough to recommend it?',
+      public:  'Focus on: customer satisfaction scores (NPS, CSAT), Glassdoor product-team health signals, app store trends, review velocity, churn signals in public reviews, feature gaps flagged by power users. Key question: is the product competitive enough to sustain current user growth?',
+      sme:     'Focus on: local customer reviews (Google Maps, Yelp, TripAdvisor if applicable), repeat customer signals, word-of-mouth indicators, complaint patterns in public reviews, product/service differentiation perceived by actual customers. Key question: do customers choose this business because of product quality or just convenience?'
     }
   },
   {
@@ -38,18 +54,18 @@ const DEFAULT_AGENTS = [
   },
   {
     id: 'market',
-    emoji: '🌊',
-    name: { ja: 'マーケット派', en: 'Market Bull' },
-    role: { ja: '市場規模・マクロ重視', en: 'Market Size & Macro Tailwinds' },
-    color: '#34d399',
-    bg: 'rgba(5,150,105,0.07)',
-    border: 'rgba(5,150,105,0.22)',
+    emoji: '⚖️',
+    name: { ja: 'マーケット分析', en: 'Market Neutral' },
+    role: { ja: 'TAM/SAM/SOM・市場実績の冷静な分析', en: 'TAM/SAM/SOM & Market Dynamics' },
+    color: '#64748b',
+    bg: 'rgba(100,116,139,0.07)',
+    border: 'rgba(100,116,139,0.25)',
     enabled: true,
-    persona: 'You are a macro-oriented investor who believes market timing and TAM are the primary determinants of venture outcomes. A rising tide lifts all boats. You focus on whether the company is positioned in a large, fast-growing opportunity.',
+    persona: 'You are a calm, data-driven market analyst with no bullish or bearish bias. Your job is to rigorously size the market opportunity using TAM/SAM/SOM frameworks and historical growth evidence. You analyse actual past growth rates across geographies, compare against GDP growth, and project future potential with explicit assumptions and confidence intervals. You neither hype nor dismiss — you quantify.',
     modeOverrides: {
-      private: 'Focus on: TAM/SAM/SOM sizing, market CAGR, regulatory tailwinds, timing (why NOW), competitive white space. Key question: is this a $10B+ market being disrupted?',
-      public:  'Focus on: sector rotation, macro tailwinds, industry growth vs GDP, global expansion optionality. Key question: is this sector in a multi-year uptrend?',
-      sme:     'Focus on: local market size, industry stability, demographic tailwinds, barriers to entry protecting the niche. Key question: is this market large enough and stable enough?'
+      private: 'Provide: TAM (bottom-up + top-down), SAM (realistic serviceable segment), SOM (achievable 5-year target with methodology). Break down by region (North America, Europe, Asia-Pacific, Rest of World). Cite actual historical CAGR with sources. Flag if market is over-hyped or under-appreciated. Key question: what share of a credibly-sized market can this company realistically capture?',
+      public:  'Provide: industry revenue growth vs GDP (5-year historical), regional revenue mix and growth differentials, addressable market expansion optionality (new geographies, adjacent verticals). Assess whether consensus TAM assumptions are conservative, realistic, or aggressive. Key question: how much of current valuation is justified by market growth alone?',
+      sme:     'Provide: local market size (total spend in the served geography), industry historical growth (3-5 year CAGR), regional demographic and economic tailwinds or headwinds. Compare target market size against business\'s current market share. Key question: is the market large and stable enough to support a 3x revenue growth over 5 years?'
     }
   },
   {

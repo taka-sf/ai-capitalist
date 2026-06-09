@@ -1359,12 +1359,46 @@ function renderResults(target, mode, research, debate, synthesis) {
   initChat(target, mode, debate);
 }
 
+// ── Detect language of text (for chat auto-lang) ─────
+function detectInputLang(text) {
+  return /[　-鿿＀-￯一-龯]/.test(text) ? 'ja' : 'en';
+}
+function chatLangInstruction(input) {
+  const lang = detectInputLang(input);
+  return lang === 'ja'
+    ? '\n\nIMPORTANT: The user is writing in Japanese. Respond entirely in Japanese (日本語で回答してください)。絵文字は使用しないこと。'
+    : '\n\nIMPORTANT: Respond entirely in English. Do not use emoji.';
+}
+
+// ── Chat session persistence (sessionStorage) ────────
+const CHAT_SESSION_KEY = 'aic_chat_session';
+function saveChatSession() {
+  try {
+    sessionStorage.setItem(CHAT_SESSION_KEY, JSON.stringify({
+      history: chatHistory,
+      agentId: chatAgentId,
+      analysisTarget: lastAnalysis?.target
+    }));
+  } catch(e) {}
+}
+function restoreChatSession() {
+  try {
+    const s = sessionStorage.getItem(CHAT_SESSION_KEY);
+    if (!s) return false;
+    const data = JSON.parse(s);
+    if (!data?.history?.length) return false;
+    // Restore only if same analysis target
+    if (lastAnalysis?.target && data.analysisTarget !== lastAnalysis.target) return false;
+    chatHistory = data.history;
+    chatAgentId = data.agentId;
+    return true;
+  } catch(e) { return false; }
+}
+
 // ── Chat / Discussion ─────────────────────────────────
 function initChat(target, mode, debate) {
-  chatHistory = [];
   chatAgentId = null;
   document.getElementById('chatSection').classList.remove('hidden');
-  document.getElementById('chatMessages').innerHTML = '';
 
   // Build agent chips
   const agents = getActiveAgents().filter(a => debate && debate[a.id] && !debate[a.id].text?.startsWith('['));
@@ -1372,10 +1406,28 @@ function initChat(target, mode, debate) {
     `<button id="chatChip_${a.id}" class="chat-chip" onclick="setChatAgent('${a.id}')" title="${a.role.en}">${a.emoji} ${a.name.en}</button>`
   ).join('');
 
-  // Enter to send (Shift+Enter = newline)
+  // Restore previous chat session for this analysis (tab switch resilience)
+  if (restoreChatSession()) {
+    // Re-render saved messages
+    document.getElementById('chatMessages').innerHTML = '';
+    chatHistory.forEach(m => {
+      const label = m.role === 'user' ? 'You' : (m.agentName || '🏛 CIO');
+      addChatBubble(m.role, label, m.content, m.rerun ? 'rerun' : '');
+    });
+    // Restore agent chip state
+    if (chatAgentId) setChatAgent(chatAgentId);
+  } else {
+    chatHistory = [];
+    document.getElementById('chatMessages').innerHTML = '';
+  }
+
+  // IME-safe Enter to send: use isComposing flag to skip Japanese composition Enter
   const inp = document.getElementById('chatInput');
   inp.onkeydown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+      e.preventDefault();
+      sendChat();
+    }
   };
 }
 
@@ -1411,18 +1463,21 @@ async function sendChat() {
   if (!cfg.apiKey) { showError('API key not set. Go to Settings.'); return; }
 
   document.getElementById('btnSendChat').disabled = true;
-  addChatBubble('user', 'You', input);
+  const userLabel = detectInputLang(input) === 'ja' ? 'あなた' : 'You';
+  addChatBubble('user', userLabel, input);
   chatHistory.push({ role: 'user', agentId: chatAgentId, content: input });
+  saveChatSession();
   document.getElementById('chatInput').value = '';
 
   // Build thinking bubble
-  const thinking = addChatBubble('assistant', '...', 'Thinking...', 'thinking');
+  const thinking = addChatBubble('assistant', '...', '...', 'thinking');
 
   try {
     const { target, mode, research, debate, synthesis } = lastAnalysis;
     const resSummary = buildResearchSummary(research);
     const synthSummary = `Verdict: ${synthesis.verdict} (${synthesis.score}/10)\nHeadline: ${synthesis.headline}\nRecommendation: ${synthesis.recommendation}`;
-    const chatCtx = chatHistory.slice(0,-1).map(m=>`${m.role==='user'?'User':m.agentName||'Assistant'}: ${m.content}`).join('\n');
+    const chatCtx = chatHistory.slice(0,-1).map(m=>`${m.role==='user'?'You':m.agentName||'CIO'}: ${m.content}`).join('\n');
+    const langInstr = chatLangInstruction(input);
 
     let response, agentLabel;
 
@@ -1443,7 +1498,7 @@ ${existingOpinion}
 ${chatCtx ? 'Previous discussion:\n' + chatCtx + '\n\n' : ''}New information / challenge from user:
 ${input}
 
-Respond in character as ${agent.name.en} (${agent.role.en}). Address the user's point directly. If new information changes your view, explain why. 150-250 words.${getLangInstruction()}`;
+Respond in character as ${agent.name.en} (${agent.role.en}). Address the user's point directly. If new information changes your view, explain why. 150-250 words.${langInstr}`;
 
       response = await callClaude({ prompt, system, maxTokens: 900 });
     } else {
@@ -1468,7 +1523,7 @@ ${debateSummary}
 ${chatCtx ? 'Previous discussion:\n' + chatCtx + '\n\n' : ''}User question:
 ${input}
 
-Answer the user's question based on the analysis above. Be specific and cite relevant data points. 150-300 words.${getLangInstruction()}`;
+Answer the user's question based on the analysis above. Be specific and cite relevant data points. 150-300 words.${langInstr}`;
 
       response = await callClaude({ prompt, maxTokens: 900 });
     }
@@ -1480,6 +1535,7 @@ Answer the user's question based on the analysis above. Be specific and cite rel
     document.getElementById('chatMessages').scrollTop = 9999;
 
     chatHistory.push({ role: 'assistant', agentId: chatAgentId, agentName: agentLabel, content: response });
+    saveChatSession();
 
   } catch(err) {
     thinking.querySelector('.chat-msg-bubble').textContent = 'Error: ' + (err.message || 'unknown');
@@ -1532,7 +1588,7 @@ Structure your response:
 4. Score: X/10 (10 = strong conviction buy, 1 = strong avoid)
 5. Return estimate: ${mode.returnMetric} — Bull/Base/Bear scenarios
 
-Be direct and specific. 300-400 words.${getLangInstruction()}`;
+Be direct and specific. 300-400 words.${chatLangInstruction(input)}`;
 
     const newText = await callClaude({ prompt, system, maxTokens: 1200 });
 
@@ -1552,6 +1608,7 @@ Be direct and specific. 300-400 words.${getLangInstruction()}`;
     document.getElementById('chatMessages').scrollTop = 9999;
 
     chatHistory.push({ role: 'assistant', agentId: chatAgentId, agentName: `${agent.emoji} ${agent.name.en}`, content: newText, rerun: true });
+    saveChatSession();
     showToast(`${agent.name.en} re-analysed ✓`);
 
   } catch(err) {
