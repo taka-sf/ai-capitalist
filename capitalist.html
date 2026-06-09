@@ -747,6 +747,7 @@ async function startAnalysis() {
   const extraContext = getContext();
 
   isRunning = true;
+  try { localStorage.removeItem('capitalist_lastResult'); } catch(e) {}  // clear stale result
   document.getElementById('btnAnalyse').disabled    = true;
   document.getElementById('errorBox').classList.add('hidden');
   document.getElementById('emptyState').classList.add('hidden');
@@ -847,34 +848,47 @@ Return ONLY a valid JSON object with these exact keys (no markdown, no preamble,
     if (el) el.classList.add('active');
   });
 
-  const raw = await callClaude({ prompt, useSearch: cfg.webSearch, maxTokens: 2400 });
+  const raw = await callClaude({ prompt, useSearch: cfg.webSearch, maxTokens: 4000 });
 
   sections.forEach(s => {
     const el = document.getElementById('pill_' + s.key);
     if (el) { el.classList.remove('active'); el.classList.add('done'); }
   });
 
-  // Try to parse JSON; unwrap double-encoding; build fallback if needed
+  // Try to parse JSON; unwrap double-encoding
   let parsed = safeJsonParse(raw);
   if (parsed && typeof parsed === 'object') {
-    // Fix double-encoding: if a section field contains the full research JSON
     const requiredKeys = ['companyName', 'description', 'sector', ...sections.map(s => s.key)];
     parsed = unwrapDoubleEncoded(parsed, requiredKeys);
     return parsed;
   }
 
-  // Fallback: distribute raw text across section keys so the UI can render
+  // safeJsonParse failed — try harder: find embedded JSON block manually
+  // (handles cases where Claude added preamble text before the JSON)
+  const jsonMatch = raw.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    try {
+      const embedded = JSON.parse(jsonMatch[0]);
+      if (embedded && typeof embedded === 'object') {
+        const requiredKeys = ['companyName', 'description', 'sector', ...sections.map(s => s.key)];
+        return unwrapDoubleEncoded(embedded, requiredKeys);
+      }
+    } catch(e) {}
+  }
+
+  // Ultimate fallback: show the cleaned raw text in the first section only
+  const cleanRaw = raw.replace(/^```(?:json)?\s*/im, '').replace(/\s*```\s*$/im, '').trim();
   const fallback = {
     companyName: target,
-    description: raw.slice(0, 300),
+    description: cleanRaw.slice(0, 400),
     sector: 'Unknown',
     _rawMode: true,
   };
-  // Give each section a portion of the raw text so agents have something to work with
-  const chunkSize = Math.floor(raw.length / Math.max(sections.length, 1));
-  sections.forEach((s, i) => {
-    fallback[s.key] = raw.slice(i * chunkSize, (i + 1) * chunkSize).trim() || '(See description above)';
-  });
+  // Put all raw text in first section; leave others with a reference
+  if (sections.length > 0) {
+    fallback[sections[0].key] = cleanRaw.slice(0, 1200).trim();
+    sections.slice(1).forEach(s => { fallback[s.key] = '(see above)'; });
+  }
   return fallback;
 }
 
@@ -1041,32 +1055,53 @@ function unwrapDoubleEncoded(obj, requiredKeys) {
 function cleanField(val, fieldKey) {
   if (!val) return '';
   let s = String(val).trim();
-  // Remove markdown fences
-  s = s.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').replace(/^`+|`+$/g, '').trim();
-  // If value IS a JSON object, try to extract the same-key field, then fallback to longest string
+  // Remove markdown fences (anywhere in string)
+  s = s.replace(/^```(?:json)?\s*/im, '').replace(/\s*```\s*$/im, '').replace(/^`+|`+$/g, '').trim();
+
+  // Helper: extract target field or longest string from a parsed inner object
+  function extractFromObj(inner) {
+    if (!inner || typeof inner !== 'object') return null;
+    if (fieldKey && typeof inner[fieldKey] === 'string' && inner[fieldKey].length > 5
+        && !inner[fieldKey].startsWith('{')) {
+      return inner[fieldKey];
+    }
+    const strs = Object.values(inner)
+      .filter(v => typeof v === 'string' && v.length > 15 && !v.startsWith('{'));
+    if (strs.length) return strs.sort((a, b) => b.length - a.length)[0];
+    return null;
+  }
+
+  // Case 1: value IS a JSON object string
   if (s.startsWith('{')) {
     try {
       const inner = JSON.parse(s);
-      if (inner && typeof inner === 'object') {
-        // Same-key field (e.g. inner.headline when we're cleaning headline)
-        if (fieldKey && typeof inner[fieldKey] === 'string' && inner[fieldKey].length > 5) {
-          return inner[fieldKey];
-        }
-        // Longest meaningful string field
-        const strs = Object.values(inner)
-          .filter(v => typeof v === 'string' && v.length > 15 && !v.startsWith('{'));
-        if (strs.length) return strs.sort((a,b) => b.length - a.length)[0];
-      }
+      const extracted = extractFromObj(inner);
+      if (extracted) return extracted;
     } catch(e) {}
-    // JSON parse failed but string starts with { — strip leading JSON noise
-    const firstSentence = s.replace(/[{}"]/g, '').split(/[:,]/)[0].trim();
-    if (firstSentence.length > 10) return firstSentence;
+    // JSON parse failed — strip JSON noise and show first meaningful text
+    const noJson = s.replace(/[{}"]/g, ' ').replace(/\s+/g, ' ').trim();
+    const firstPart = noJson.split(/[:,]/)[0].trim();
+    if (firstPart.length > 10) return firstPart;
   }
-  // Strip Japanese preamble text before JSON
-  const jsonStart = s.search(/\{/);
-  if (jsonStart > 40 && /収集|JSON|分析|回答|作成/.test(s.slice(0, jsonStart))) {
-    return s.slice(0, jsonStart).trim();
+
+  // Case 2: preamble text followed by an embedded JSON block
+  const jsonIdx = s.indexOf('{');
+  if (jsonIdx > 0) {
+    // Try to extract and parse the embedded JSON
+    const jsonCandidate = s.slice(jsonIdx);
+    const lastBrace = jsonCandidate.lastIndexOf('}');
+    if (lastBrace >= 0) {
+      try {
+        const inner = JSON.parse(jsonCandidate.slice(0, lastBrace + 1));
+        const extracted = extractFromObj(inner);
+        if (extracted) return extracted;
+      } catch(e) {}
+    }
+    // If JSON extraction failed, return just the preamble before the JSON
+    const preamble = s.slice(0, jsonIdx).trim().replace(/\s+/g, ' ');
+    if (preamble.length > 10) return preamble;
   }
+
   return s;
 }
 
@@ -1075,6 +1110,12 @@ function stripJsonArtifacts(val) { return cleanField(val, null); }
 
 // ── Render results ────────────────────────────────────
 function renderResults(target, mode, research, debate, synthesis) {
+  // Always unwrap double-encoding at render time (covers restored results too)
+  const synthKeys = ['verdict', 'score', 'headline', 'bull_case', 'bear_case', 'recommendation'];
+  synthesis = unwrapDoubleEncoded(synthesis || {}, synthKeys);
+  const resKeys = ['companyName', 'description', 'sector'];
+  research = unwrapDoubleEncoded(research || {}, resKeys);
+
   document.getElementById('resultsWrap').classList.remove('hidden');
 
   // Header
