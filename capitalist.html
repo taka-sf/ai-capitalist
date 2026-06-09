@@ -26,6 +26,10 @@
 .chat-msg-bubble.user { background: var(--accent-dim); border: 1px solid rgba(108,78,200,0.2); align-self:flex-end; max-width:85%; }
 .chat-msg-bubble.assistant { background: var(--surface); border: 1px solid var(--border); }
 .chat-msg-bubble.thinking { color: var(--text-3); font-style: italic; }
+.chat-msg-bubble.thinking .thinking-dot { display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--text-3); margin:0 2px; animation:chatDotBounce 1.2s ease-in-out infinite; }
+.chat-msg-bubble.thinking .thinking-dot:nth-child(2){animation-delay:0.2s}
+.chat-msg-bubble.thinking .thinking-dot:nth-child(3){animation-delay:0.4s}
+@keyframes chatDotBounce { 0%,60%,100%{transform:translateY(0);opacity:0.4} 30%{transform:translateY(-6px);opacity:1} }
 
 /* ── Mode buttons ── */
 .mode-selector { display: flex; gap: 6px; margin-bottom: 14px; }
@@ -392,6 +396,9 @@
             <div class="export-wrap" id="exportWrap">
               <button class="btn btn-ghost btn-sm" onclick="toggleExportMenu()">Export ▾</button>
               <div class="export-menu" id="exportMenu">
+                <button class="export-menu-item" onclick="exportPDF()">
+                  <span class="icon">📑</span> Download as PDF
+                </button>
                 <button class="export-menu-item" onclick="exportWord()">
                   <span class="icon">📄</span> Download as Word (.doc)
                 </button>
@@ -939,32 +946,66 @@ Return ONLY the JSON object below. Start with { on the first line. No preamble, 
     return parsed;
   }
 
-  // safeJsonParse failed — try harder: find embedded JSON block manually
-  // (handles cases where Claude added preamble text before the JSON)
-  const jsonMatch = raw.match(/\{[\s\S]*\}/);
-  if (jsonMatch) {
+  // safeJsonParse failed — try harder
+
+  // Step 1: strip markdown fences, then find the JSON object
+  const stripped = raw
+    .replace(/^```(?:json)?\s*/im, '')
+    .replace(/\s*```\s*$/im, '')
+    .trim();
+
+  // Step 2: find the outermost JSON object (handles preamble text before {)
+  const braceIdx = stripped.indexOf('{');
+  if (braceIdx >= 0) {
+    const jsonCandidate = stripped.slice(braceIdx);
+    // Try full parse first
     try {
-      const embedded = JSON.parse(jsonMatch[0]);
+      const embedded = JSON.parse(jsonCandidate);
       if (embedded && typeof embedded === 'object') {
         const requiredKeys = ['companyName', 'description', 'sector', ...sections.map(s => s.key)];
         return unwrapDoubleEncoded(embedded, requiredKeys);
       }
     } catch(e) {}
+
+    // Try trimming to last }
+    const lastBrace = jsonCandidate.lastIndexOf('}');
+    if (lastBrace >= 0) {
+      try {
+        const embedded = JSON.parse(jsonCandidate.slice(0, lastBrace + 1));
+        if (embedded && typeof embedded === 'object') {
+          const requiredKeys = ['companyName', 'description', 'sector', ...sections.map(s => s.key)];
+          return unwrapDoubleEncoded(embedded, requiredKeys);
+        }
+      } catch(e) {}
+    }
+
+    // Step 3: JSON is truncated — use per-field regex extraction
+    const allKeys = ['companyName', 'description', 'sector', ...sections.map(s => s.key)];
+    const regexResult = {};
+    let anyFound = false;
+    allKeys.forEach(key => {
+      const re = new RegExp('"' + key + '"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"');
+      const m = jsonCandidate.match(re);
+      if (m && m[1].length > 2) {
+        regexResult[key] = m[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+        anyFound = true;
+      }
+    });
+    if (anyFound) {
+      if (!regexResult.companyName) regexResult.companyName = target;
+      if (!regexResult.sector) regexResult.sector = 'Unknown';
+      return regexResult;
+    }
   }
 
-  // Ultimate fallback: show the cleaned raw text in the first section only
-  const cleanRaw = raw.replace(/^```(?:json)?\s*/im, '').replace(/\s*```\s*$/im, '').trim();
+  // Ultimate fallback: show raw text in description only, leave sections empty
   const fallback = {
     companyName: target,
-    description: cleanRaw.slice(0, 400),
+    description: stripped.slice(0, 600),
     sector: 'Unknown',
     _rawMode: true,
   };
-  // Put all raw text in first section; leave others with a reference
-  if (sections.length > 0) {
-    fallback[sections[0].key] = cleanRaw.slice(0, 1200).trim();
-    sections.slice(1).forEach(s => { fallback[s.key] = '(see above)'; });
-  }
+  sections.forEach(s => { fallback[s.key] = ''; });
   return fallback;
 }
 
@@ -1143,7 +1184,13 @@ function unwrapDoubleEncoded(obj, requiredKeys) {
 function cleanField(val, fieldKey) {
   if (!val) return '';
   let s = String(val).trim();
-  // Remove markdown fences (anywhere in string)
+  // If the string contains ```json ... it's a preamble + JSON — extract preamble before the fence
+  const fenceIdx = s.indexOf('```');
+  if (fenceIdx > 0) {
+    const preamble = s.slice(0, fenceIdx).trim();
+    if (preamble.length > 10 && !preamble.startsWith('{')) return preamble;
+  }
+  // Remove markdown fences
   s = s.replace(/^```(?:json)?\s*/im, '').replace(/\s*```\s*$/im, '').replace(/^`+|`+$/g, '').trim();
 
   // Helper: extract target field or longest string from a parsed inner object
@@ -1463,14 +1510,13 @@ async function sendChat() {
   if (!cfg.apiKey) { showError('API key not set. Go to Settings.'); return; }
 
   document.getElementById('btnSendChat').disabled = true;
-  const userLabel = detectInputLang(input) === 'ja' ? 'あなた' : 'You';
-  addChatBubble('user', userLabel, input);
+  addChatBubble('user', 'You', input);
   chatHistory.push({ role: 'user', agentId: chatAgentId, content: input });
   saveChatSession();
   document.getElementById('chatInput').value = '';
 
   // Build thinking bubble
-  const thinking = addChatBubble('assistant', '...', '...', 'thinking');
+  const thinking = addChatBubble('assistant', 'Thinking...', '<span class="thinking-dot"></span><span class="thinking-dot"></span><span class="thinking-dot"></span>', 'thinking');
 
   try {
     const { target, mode, research, debate, synthesis } = lastAnalysis;
@@ -1713,6 +1759,102 @@ function buildAgentDebateHTML() {
     const name   = header ? header.innerText.replace(/\n/g, ' ').trim() : 'Agent';
     return `<div class="agent-section"><div class="agent-name">${escHtml(name)}</div><div>${body ? body.innerHTML : ''}</div></div>`;
   }).join('');
+}
+
+function exportPDF() {
+  document.getElementById('exportMenu').classList.remove('open');
+  const { target, mode, research, synthesis } = lastAnalysis || {};
+  const name = (document.getElementById('resName')?.textContent || target || 'analysis').trim();
+  const now  = new Date().toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' });
+
+  // Gather content from live DOM
+  const verdictEl   = document.getElementById('verdictBlock');
+  const synthEl     = document.getElementById('synthContent');
+  const researchEl  = document.getElementById('researchContent');
+  const debateCards = document.querySelectorAll('#debateGrid .agent-card');
+
+  const agentDebateHTML = Array.from(debateCards).map(card => {
+    const hdr  = card.querySelector('.agent-card-header');
+    const body = card.querySelector('.agent-card-body');
+    const emoji = hdr?.querySelector('.agent-emoji')?.textContent || '';
+    const aname = hdr?.querySelector('.agent-name')?.textContent || '';
+    const role  = hdr?.querySelector('.agent-role')?.textContent || '';
+    return `
+      <div style="break-inside:avoid;margin-bottom:18pt;padding:10pt 14pt;border:1pt solid #e0d8f8;border-radius:6pt;background:#faf8ff;">
+        <div style="font-size:10pt;font-weight:700;color:#5b3db8;margin-bottom:4pt;">${escHtml(emoji+' '+aname)} <span style="font-weight:400;color:#888;font-size:9pt;">— ${escHtml(role)}</span></div>
+        <div style="font-size:10pt;color:#222;line-height:1.6;">${body ? body.innerHTML : ''}</div>
+      </div>`;
+  }).join('');
+
+  const modeLabel = mode?.label?.en || '';
+  const verdict   = synthesis?.verdict || '';
+  const score     = synthesis?.score   || '';
+  const verdictColor = verdict === 'PASS' ? '#16a34a' : verdict === 'FAIL' ? '#dc2626' : '#d97706';
+
+  const pdfHtml = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>${escHtml(name)} — IC Memo</title>
+<style>
+  @page { size: A4; margin: 20mm 18mm; }
+  * { box-sizing: border-box; }
+  body { font-family: 'Helvetica Neue', Arial, 'Hiragino Sans', 'Meiryo', sans-serif; font-size: 10pt; color: #1a1a2e; line-height: 1.65; margin: 0; }
+  h1 { font-size: 20pt; font-weight: 800; margin: 0 0 4pt; color: #1a1a2e; }
+  h2 { font-size: 12pt; font-weight: 700; color: #5b3db8; margin: 18pt 0 8pt; padding-bottom: 4pt; border-bottom: 1.5pt solid #e8e0ff; page-break-after: avoid; }
+  h3 { font-size: 10.5pt; font-weight: 700; color: #333; margin: 12pt 0 4pt; }
+  .header { margin-bottom: 20pt; padding-bottom: 12pt; border-bottom: 2pt solid #5b3db8; }
+  .meta { font-size: 9pt; color: #888; margin-top: 4pt; }
+  .verdict-pill { display: inline-block; padding: 4pt 14pt; border-radius: 20pt; font-size: 12pt; font-weight: 800; color: #fff; background: ${verdictColor}; margin-right: 10pt; }
+  .score-badge { display: inline-block; padding: 4pt 10pt; border: 2pt solid #5b3db8; border-radius: 8pt; font-size: 11pt; font-weight: 700; color: #5b3db8; }
+  .section-card { background: #faf8ff; border: 1pt solid #e0d8f8; border-radius: 6pt; padding: 10pt 14pt; margin-bottom: 10pt; break-inside: avoid; }
+  .label { font-family: monospace; font-size: 8pt; text-transform: uppercase; letter-spacing: 1.5pt; color: #888; font-weight: 700; margin-bottom: 4pt; }
+  .research-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10pt; }
+  .research-item { background: #faf8ff; border: 1pt solid #e0d8f8; border-radius: 6pt; padding: 10pt 14pt; break-inside: avoid; }
+  p { margin: 0 0 8pt; }
+  strong { font-weight: 700; }
+  ul, ol { margin: 4pt 0; padding-left: 16pt; }
+  li { margin-bottom: 3pt; }
+  .footer { margin-top: 24pt; padding-top: 8pt; border-top: 1pt solid #eee; font-size: 8pt; color: #aaa; text-align: center; }
+  @media print { body { print-color-adjust: exact; -webkit-print-color-adjust: exact; } }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>${escHtml(name)}</h1>
+  <div class="meta">Investment Committee Memo &nbsp;·&nbsp; ${escHtml(modeLabel)} &nbsp;·&nbsp; ${now}</div>
+</div>
+
+<h2>Verdict &amp; Score</h2>
+<div style="margin-bottom:14pt;">
+  <span class="verdict-pill">${escHtml(verdict || '—')}</span>
+  <span class="score-badge">${score}/10</span>
+</div>
+
+<div id="__synth__">${synthEl ? synthEl.innerHTML : ''}</div>
+
+<h2>Agent Debate</h2>
+${agentDebateHTML}
+
+<h2>Research</h2>
+<div>${researchEl ? researchEl.innerHTML : ''}</div>
+
+<div class="footer">AI Capitalist — Confidential Investment Committee Memo &nbsp;·&nbsp; Generated ${now}</div>
+
+</body></html>`;
+
+  // Open in new window for browser Print → Save as PDF
+  const win = window.open('', '_blank');
+  if (!win) { showToast('Please allow pop-ups to export PDF.'); return; }
+  win.document.write(pdfHtml);
+  win.document.close();
+  win.focus();
+  // Slight delay so styles apply before print dialog
+  setTimeout(() => {
+    win.print();
+  }, 600);
+  showToast('Print dialog opened — choose "Save as PDF".');
 }
 
 function exportWord() {
