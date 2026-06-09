@@ -239,15 +239,20 @@
       AI CAPITALIST
     </a>
     <div class="nav-links">
-      <a href="index.html"      class="nav-link hide-mobile">Hub</a>
+      <a href="index.html"      class="nav-link hide-mobile" onclick="return navGuard(event)">Hub</a>
       <a href="capitalist.html" class="nav-link active">Analyse</a>
-      <a href="history.html"    class="nav-link hide-mobile">History</a>
-      <a href="settings.html"   class="nav-link">Settings</a>
+      <a href="history.html"    class="nav-link hide-mobile" onclick="return navGuard(event)">History</a>
+      <a href="settings.html"   class="nav-link" onclick="return navGuard(event)">Settings</a>
     </div>
     <div class="nav-actions">
       <button class="btn btn-ghost btn-sm" id="btnNew" onclick="resetAnalysis()">New</button>
     </div>
   </nav>
+
+  <!-- Analysis-in-progress warning banner -->
+  <div id="analysisWarningBanner" style="display:none;background:#2d1f4e;border-bottom:1px solid rgba(108,78,200,0.4);padding:8px 20px;text-align:center;font-size:11px;color:rgba(200,180,255,0.9);font-family:var(--font-mono);">
+    ⚠ Analysis in progress — do not leave this page or the analysis will be cancelled.
+  </div>
 
   <div class="main">
     <div class="workspace">
@@ -433,6 +438,29 @@ let currentMode = 'private';
 let currentLang = 'en';   // 'en' | 'ja'
 let isRunning    = false;
 let liveAgentEls = {};
+
+// Prevent page navigation while analysis is running
+function navGuard(e) {
+  if (!isRunning) return true;
+  e.preventDefault();
+  showToast('⚠ Analysis in progress — please wait for completion.');
+  return false;
+}
+
+// Show/hide the analysis warning banner
+function setRunningState(running) {
+  isRunning = running;
+  const banner = document.getElementById('analysisWarningBanner');
+  if (banner) banner.style.display = running ? 'block' : 'none';
+}
+
+// Block browser back/forward/close while running
+window.addEventListener('beforeunload', (e) => {
+  if (isRunning) {
+    e.preventDefault();
+    e.returnValue = 'Analysis is in progress. Leaving now will cancel it.';
+  }
+});
 
 // ── Language helpers ──────────────────────────────────
 function setLang(lang) {
@@ -721,7 +749,7 @@ function showToast(msg) {
 }
 
 function resetAnalysis() {
-  isRunning = false;
+  setRunningState(false);
   document.getElementById('progressWrap').classList.add('hidden');
   document.getElementById('emptyState').classList.remove('hidden');
   document.getElementById('resultsWrap').classList.add('hidden');
@@ -746,7 +774,7 @@ async function startAnalysis() {
 
   const extraContext = getContext();
 
-  isRunning = true;
+  setRunningState(true);
   try { localStorage.removeItem('capitalist_lastResult'); } catch(e) {}  // clear stale result
   document.getElementById('btnAnalyse').disabled    = true;
   document.getElementById('errorBox').classList.add('hidden');
@@ -804,7 +832,7 @@ async function startAnalysis() {
     showError(err.message || 'Analysis failed. Please try again.');
     console.error(err);
   } finally {
-    isRunning = false;
+    setRunningState(false);
     document.getElementById('btnAnalyse').disabled = false;
     document.getElementById('progressWrap').classList.add('hidden');
     document.getElementById('liveDebate').classList.add('hidden');
@@ -824,23 +852,22 @@ async function runResearch(target, mode, cfg, extraContext) {
     : '';
 
   const langNote = getLangInstruction();
+  const langInline = currentLang === 'ja' ? ' (日本語で記述)' : '';
 
-  const prompt = `You are a professional investment analyst. Research "${target}" thoroughly for investment analysis.
+  const prompt = `Research "${target}" thoroughly for investment analysis.
 ${mode.researchPromptExtra}
 ${contextBlock}
 CRITICAL INSTRUCTIONS:
-- You MUST populate every field in the JSON below.
-- If public data is scarce (private company, SME, early-stage startup), use the additional context provided, industry benchmarks, comparable companies, and reasonable estimates. NEVER leave a field empty or null.
-- Clearly mark estimates with "(est.)" so readers know the confidence level.
-- Do not refuse or skip fields due to data unavailability — always provide your best professional assessment.
-- Each field value must be a plain text string. Do NOT nest JSON objects or JSON strings inside field values.${langNote ? '\n- ' + langNote.trim() : ''}
+- You MUST populate every field. Use estimates marked "(est.)" if data is scarce.
+- Each field value must be a plain text string. Do NOT nest JSON inside field values.
+- All string values must be written in ${currentLang === 'ja' ? 'Japanese (日本語)' : 'English'}.
 
-Return ONLY a valid JSON object with these exact keys (no markdown, no preamble, start directly with {):
+Return ONLY the JSON object below. Start with { on the first line. No preamble, no explanation, no markdown.
 {
-  "companyName": "official name or best known name",
-  "description": "2-sentence business description",
-  "sector": "sector / industry",
-  ${sections.map(s => `"${s.key}": "detailed findings for ${s.label.en} (2-4 sentences, use estimates if needed)"`).join(',\n  ')}
+  "companyName": "official company name${langInline}",
+  "description": "2-sentence business description${langInline}",
+  "sector": "sector / industry${langInline}",
+  ${sections.map(s => `"${s.key}": "detailed findings for ${s.label.en} (2-4 sentences)${langInline}"`).join(',\n  ')}
 }`;
 
   sections.forEach(s => {
@@ -848,7 +875,8 @@ Return ONLY a valid JSON object with these exact keys (no markdown, no preamble,
     if (el) el.classList.add('active');
   });
 
-  const raw = await callClaude({ prompt, useSearch: cfg.webSearch, maxTokens: 4000 });
+  const researchSystem = 'You are a JSON API. Output ONLY a valid JSON object. No text before or after the JSON. No markdown. Start your response with { and end with }.';
+  const raw = await callClaude({ prompt, system: researchSystem, useSearch: cfg.webSearch, maxTokens: 4000 });
 
   sections.forEach(s => {
     const el = document.getElementById('pill_' + s.key);
@@ -995,39 +1023,50 @@ async function runSynthesis(target, mode, agents, debateResults, cfg) {
     return r ? `=== ${a.name.en} ===\n${r.text}` : '';
   }).filter(Boolean).join('\n\n').slice(0, 4000);
 
+  const langInline = currentLang === 'ja' ? ' (日本語で記述)' : '';
   const prompt = `You are the Chief Investment Officer chairing a ${mode.label.en} investment committee.
 
 Company: "${target}"
 Agent debate:
 ${debateSummary}
 
-Synthesize the committee's views into a final investment memo.${langNote ? '\nIMPORTANT: ' + langNote.trim() : ''}
-Return ONLY a JSON object (no markdown, no preamble, start directly with {).
-Each field value must be a plain text string — do NOT nest JSON inside field values.
+Synthesize the committee's views. Write all string values in ${currentLang === 'ja' ? 'Japanese (日本語)' : 'English'}.
+Return ONLY the JSON object below. Start with { on the first line. No preamble, no explanation, no markdown.
 {
   "verdict": "STRONG_BUY|BUY|WATCH|PASS|STRONG_PASS",
   "score": 7.2,
-  "headline": "One-sentence investment thesis",
-  "bull_case": "2-3 sentences on the bull case",
-  "bear_case": "2-3 sentences on the bear case",
-  "key_risks": ["risk 1", "risk 2", "risk 3"],
-  "return_bull": "${mode.returnMetric} bull scenario",
-  "return_base": "${mode.returnMetric} base scenario",
-  "return_bear": "${mode.returnMetric} bear scenario",
-  "recommendation": "3-4 sentence final recommendation",
+  "headline": "One-sentence investment thesis${langInline}",
+  "bull_case": "2-3 sentences on the bull case${langInline}",
+  "bear_case": "2-3 sentences on the bear case${langInline}",
+  "key_risks": ["risk 1${langInline}", "risk 2${langInline}", "risk 3${langInline}"],
+  "return_bull": "${mode.returnMetric} bull scenario${langInline}",
+  "return_base": "${mode.returnMetric} base scenario${langInline}",
+  "return_bear": "${mode.returnMetric} bear scenario${langInline}",
+  "recommendation": "3-4 sentence final recommendation${langInline}",
   "conviction": "HIGH|MEDIUM|LOW"
 }`;
 
-  const raw    = await callClaude({ prompt, maxTokens: 900 });
+  const synthSystem = 'You are a JSON API. Output ONLY a valid JSON object. No text before or after the JSON. No markdown. Start your response with { and end with }.';
+  const raw    = await callClaude({ prompt, system: synthSystem, maxTokens: 1500 });
   let parsed = safeJsonParse(raw);
   if (parsed) {
     const synthKeys = ['verdict', 'score', 'headline', 'bull_case', 'bear_case', 'recommendation'];
     parsed = unwrapDoubleEncoded(parsed, synthKeys);
     return parsed;
   }
-  // Fallback: strip JSON artifacts and show readable text
-  const cleanRaw = cleanField(raw, null);
-  return { verdict: 'WATCH', score: 5, headline: cleanRaw.slice(0, 160), recommendation: cleanRaw.slice(0, 600) };
+  // safeJsonParse failed — try regex extraction of embedded JSON
+  const jsonMatch = raw.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    try {
+      const embedded = JSON.parse(jsonMatch[0]);
+      if (embedded && typeof embedded === 'object') {
+        const synthKeys = ['verdict', 'score', 'headline', 'bull_case', 'bear_case', 'recommendation'];
+        return unwrapDoubleEncoded(embedded, synthKeys);
+      }
+    } catch(e) {}
+  }
+  // Ultimate fallback
+  return { verdict: 'WATCH', score: 5, headline: '(Analysis could not be parsed)', recommendation: raw.slice(0, 600) };
 }
 
 // ── JSON double-encoding fix ──────────────────────────
@@ -1110,11 +1149,39 @@ function stripJsonArtifacts(val) { return cleanField(val, null); }
 
 // ── Render results ────────────────────────────────────
 function renderResults(target, mode, research, debate, synthesis) {
-  // Always unwrap double-encoding at render time (covers restored results too)
+  synthesis = synthesis || {};
+  research  = research  || {};
+
+  // Step 1: unwrap top-level double-encoding (full JSON in one field)
   const synthKeys = ['verdict', 'score', 'headline', 'bull_case', 'bear_case', 'recommendation'];
-  synthesis = unwrapDoubleEncoded(synthesis || {}, synthKeys);
+  synthesis = unwrapDoubleEncoded(synthesis, synthKeys);
   const resKeys = ['companyName', 'description', 'sector'];
-  research = unwrapDoubleEncoded(research || {}, resKeys);
+  research  = unwrapDoubleEncoded(research, resKeys);
+
+  // Step 2: deep-clean each string field in synthesis
+  // (handles cases where individual fields still contain JSON strings after unwrap)
+  const textFields = ['headline', 'bull_case', 'bear_case', 'recommendation', 'conviction',
+                      'return_bull', 'return_base', 'return_bear'];
+  textFields.forEach(k => {
+    if (typeof synthesis[k] === 'string') {
+      synthesis[k] = cleanField(synthesis[k], k);
+    }
+  });
+  // verdict must be one of the known tokens — strip JSON noise if needed
+  if (typeof synthesis.verdict === 'string' && synthesis.verdict.startsWith('{')) {
+    synthesis.verdict = 'WATCH';
+  }
+  // score must be a number
+  if (typeof synthesis.score === 'string') {
+    const n = parseFloat(synthesis.score);
+    synthesis.score = isNaN(n) ? 5 : n;
+  }
+  // key_risks must be an array of plain strings
+  if (Array.isArray(synthesis.key_risks)) {
+    synthesis.key_risks = synthesis.key_risks.map(r =>
+      typeof r === 'string' ? cleanField(r, null) : String(r)
+    );
+  }
 
   document.getElementById('resultsWrap').classList.remove('hidden');
 
@@ -1157,22 +1224,21 @@ function renderResults(target, mode, research, debate, synthesis) {
     </div>
   `;
 
-  // Synthesis tab — extract plain text from any double-encoded field values
-  const cs = (key) => cleanField(synthesis[key], key);
+  // Synthesis tab — fields already cleaned above; render directly
   const risks = Array.isArray(synthesis.key_risks) ? synthesis.key_risks : [];
   document.getElementById('synthContent').innerHTML = `
     <div class="synthesis-section">
       <div class="synth-label">Recommendation</div>
-      <div class="synth-body">${md(cs('recommendation'))}</div>
+      <div class="synth-body">${md(synthesis.recommendation || '')}</div>
     </div>
     <div class="summary-grid" style="margin-bottom:20px">
       <div class="synthesis-section">
         <div class="synth-label">Bull Case</div>
-        <div class="synth-body" style="font-size:12px">${md(cs('bull_case'))}</div>
+        <div class="synth-body" style="font-size:12px">${md(synthesis.bull_case || '')}</div>
       </div>
       <div class="synthesis-section">
         <div class="synth-label">Bear Case</div>
-        <div class="synth-body" style="font-size:12px">${md(cs('bear_case'))}</div>
+        <div class="synth-body" style="font-size:12px">${md(synthesis.bear_case || '')}</div>
       </div>
     </div>
     ${risks.length ? `
@@ -1224,13 +1290,28 @@ function renderResults(target, mode, research, debate, synthesis) {
 }
 
 // ── Load existing result ──────────────────────────────
-function loadExistingResult(id) {
-  const history = window.ConfigModule.loadHistory();
-  const item = history.find(h => h.id === id);
-  if (!item) return;
+async function loadExistingResult(id) {
+  try {
+    const history = await window.ConfigModule.loadHistory();
+    const item = history.find(h => h.id === id);
+    if (!item) {
+      // Fallback: check localStorage directly (in case cloud sync isn't set up)
+      const local = JSON.parse(localStorage.getItem('capitalist_history') || '[]');
+      const localItem = local.find(h => h.id === id);
+      if (!localItem) return;
+      _renderHistoryItem(localItem);
+      return;
+    }
+    _renderHistoryItem(item);
+  } catch(e) {
+    console.error('loadExistingResult error:', e);
+  }
+}
+
+function _renderHistoryItem(item) {
   document.getElementById('targetInput').value = item.name || '';
   selectMode(item.mode || 'private');
-  const mode   = getModeById(item.mode || 'private');
+  const mode = getModeById(item.mode || 'private');
   renderResults(item.name, mode, item.research || {}, item.debate || {}, item.synthesis || {});
 }
 
