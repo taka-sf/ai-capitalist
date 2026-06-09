@@ -122,7 +122,7 @@
   display: flex; align-items: center; gap: 8px;
 }
 .agent-card-body {
-  padding: 14px; font-size: 12px; color: var(--text-2); line-height: 1.6; min-height: 80px;
+  padding: 14px; font-size: 12px; color: var(--text-1); line-height: 1.6; min-height: 80px;
 }
 .agent-card-body.streaming::after { content: '▋'; animation: blink 0.7s step-end infinite; }
 @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
@@ -680,10 +680,11 @@ function init() {
     selectMode(autoMode || 'private');
   }
   if (params.get('mode')) selectMode(params.get('mode'));
+  const hasNavParam = params.get('q') || params.get('mode') || params.get('new');
   if (params.get('id')) {
     loadExistingResult(params.get('id'));
-  } else {
-    // Restore last result on refresh (no ?id= param)
+  } else if (!hasNavParam) {
+    // Restore last result only on plain refresh (no navigation params)
     try {
       const last = localStorage.getItem('capitalist_lastResult');
       if (last) {
@@ -861,6 +862,7 @@ CRITICAL INSTRUCTIONS:
 - You MUST populate every field. Use estimates marked "(est.)" if data is scarce.
 - Each field value must be a plain text string. Do NOT nest JSON inside field values.
 - All string values must be written in ${currentLang === 'ja' ? 'Japanese (日本語)' : 'English'}.
+- Monetary values: use short notation — $10bn, $2.5m, ¥500bn, €1.2bn, S$3bn, C$5bn, A$2bn, HK$10bn. Never write "100 billion dollars".
 
 Return ONLY the JSON object below. Start with { on the first line. No preamble, no explanation, no markdown.
 {
@@ -1031,6 +1033,7 @@ Agent debate:
 ${debateSummary}
 
 Synthesize the committee's views. Write all string values in ${currentLang === 'ja' ? 'Japanese (日本語)' : 'English'}.
+Use short monetary notation: $10bn, $2.5m, ¥500bn, S$3bn, C$5bn, A$2bn, HK$10bn.
 Return ONLY the JSON object below. Start with { on the first line. No preamble, no explanation, no markdown.
 {
   "verdict": "STRONG_BUY|BUY|WATCH|PASS|STRONG_PASS",
@@ -1110,17 +1113,32 @@ function cleanField(val, fieldKey) {
     return null;
   }
 
+  // Helper: regex-extract a single key's value from a (possibly truncated) JSON string
+  function regexExtractField(jsonStr, key) {
+    if (!key) return null;
+    // Match "key": "value" — handles escaped quotes inside value
+    const re = new RegExp('"' + key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"');
+    const m = jsonStr.match(re);
+    if (m && m[1].length > 3) return m[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+    return null;
+  }
+
   // Case 1: value IS a JSON object string
   if (s.startsWith('{')) {
     try {
       const inner = JSON.parse(s);
       const extracted = extractFromObj(inner);
       if (extracted) return extracted;
-    } catch(e) {}
-    // JSON parse failed — strip JSON noise and show first meaningful text
-    const noJson = s.replace(/[{}"]/g, ' ').replace(/\s+/g, ' ').trim();
-    const firstPart = noJson.split(/[:,]/)[0].trim();
-    if (firstPart.length > 10) return firstPart;
+    } catch(e) {
+      // JSON parse failed (possibly truncated) — try regex extraction first
+      if (fieldKey) {
+        const regexVal = regexExtractField(s, fieldKey);
+        if (regexVal) return regexVal;
+      }
+      // Still failed — return empty rather than garbage key names
+      return '';
+    }
+    return '';
   }
 
   // Case 2: preamble text followed by an embedded JSON block
@@ -1155,7 +1173,9 @@ function renderResults(target, mode, research, debate, synthesis) {
   // Step 1: unwrap top-level double-encoding (full JSON in one field)
   const synthKeys = ['verdict', 'score', 'headline', 'bull_case', 'bear_case', 'recommendation'];
   synthesis = unwrapDoubleEncoded(synthesis, synthKeys);
-  const resKeys = ['companyName', 'description', 'sector'];
+  // Use ALL section keys so unwrap doesn't fire on a partial key match (3-key version too aggressive)
+  const resSectionKeys = (mode.researchSections || []).map(s => s.key);
+  const resKeys = ['companyName', 'description', 'sector', ...resSectionKeys];
   research  = unwrapDoubleEncoded(research, resKeys);
 
   // Step 2: deep-clean each string field in synthesis
@@ -1202,7 +1222,7 @@ function renderResults(target, mode, research, debate, synthesis) {
     <div>
       <div class="verdict-label">Committee Verdict</div>
       <div class="verdict-badge-lg verdict ${vClass}">${v.replace('_',' ')}</div>
-      <div style="font-size:12px;color:var(--text-2);margin-top:8px;max-width:340px">${escHtml(cleanField(synthesis.headline, 'headline'))}</div>
+      <div style="font-size:12px;color:var(--text-1);margin-top:8px;max-width:340px">${escHtml(cleanField(synthesis.headline, 'headline'))}</div>
     </div>
     <div class="score-ring" style="background:rgba(255,255,255,0.03);border:2px solid ${scoreBorder};color:${scoreColor}">${score}</div>
     <div>
@@ -1244,12 +1264,12 @@ function renderResults(target, mode, research, debate, synthesis) {
     ${risks.length ? `
     <div class="synthesis-section">
       <div class="synth-label">Key Risks</div>
-      ${risks.map(r => `<div style="display:flex;gap:8px;margin-bottom:6px;font-size:12px;color:var(--text-2)"><span style="color:var(--red)">▲</span>${escHtml(String(r))}</div>`).join('')}
+      ${risks.map(r => `<div style="display:flex;gap:8px;margin-bottom:6px;font-size:12px;color:var(--text-1)"><span style="color:var(--red)">▲</span>${escHtml(String(r))}</div>`).join('')}
     </div>` : ''}
     ${research.description ? `
     <div class="synthesis-section">
       <div class="synth-label">Company Overview</div>
-      <div class="synth-body" style="font-size:12px;color:var(--text-2)">${md(cleanField(research.description, 'description'))}</div>
+      <div class="synth-body" style="font-size:12px;color:var(--text-1)">${md(cleanField(research.description, 'description'))}</div>
     </div>` : ''}
   `;
 
@@ -1283,7 +1303,7 @@ function renderResults(target, mode, research, debate, synthesis) {
     return `
       <div style="margin-bottom:12px;padding:14px;border-radius:var(--radius-sm);background:var(--surface);border:1px solid var(--border)">
         <div class="synth-label" style="margin-bottom:6px">${s.label.en}</div>
-        <div style="font-size:12px;color:var(--text-2);line-height:1.6">${md(cleanVal)}</div>
+        <div style="font-size:13px;color:var(--text-1);line-height:1.7">${md(cleanVal)}</div>
       </div>
     `;
   }).join('') || `<div style="padding:20px;color:var(--text-3);font-size:12px">No structured research data available. Raw data may be in agent responses.</div>`;
