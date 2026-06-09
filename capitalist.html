@@ -9,6 +9,24 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="shared/style.css">
 <style>
+/* ── Chat / Discussion ── */
+.chat-chip {
+  padding: 4px 12px; border-radius: 20px; border: 1px solid var(--border);
+  background: transparent; font-size: 10px; font-family: var(--font-mono);
+  color: var(--text-3); cursor: pointer; transition: all 0.15s;
+}
+.chat-chip:hover { border-color: var(--accent); color: var(--accent); }
+.chat-chip.active { background: var(--accent-dim); border-color: rgba(108,78,200,0.4); color: var(--accent); }
+.chat-msg { display:flex; flex-direction:column; gap:4px; }
+.chat-msg-label { font-size:10px; font-family:var(--font-mono); color:var(--text-3); }
+.chat-msg-bubble {
+  padding: 10px 14px; border-radius: var(--radius-sm);
+  font-size: 12px; line-height: 1.6; color: var(--text-1);
+}
+.chat-msg-bubble.user { background: var(--accent-dim); border: 1px solid rgba(108,78,200,0.2); align-self:flex-end; max-width:85%; }
+.chat-msg-bubble.assistant { background: var(--surface); border: 1px solid var(--border); }
+.chat-msg-bubble.thinking { color: var(--text-3); font-style: italic; }
+
 /* ── Mode buttons ── */
 .mode-selector { display: flex; gap: 6px; margin-bottom: 14px; }
 .mode-btn {
@@ -409,6 +427,30 @@
 
         </div><!-- /resultsWrap -->
 
+        <!-- ── Discussion / Chat ── -->
+        <div id="chatSection" class="hidden" style="margin-top:24px">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+            <span style="font-family:var(--font-mono);font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--text-3)">Discussion</span>
+            <span style="font-size:10px;color:var(--text-3);font-family:var(--font-mono)">— ask questions or provide new context to re-run an agent</span>
+          </div>
+          <!-- Agent selector chips -->
+          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;align-items:center">
+            <span style="font-size:10px;color:var(--text-3);font-family:var(--font-mono);margin-right:4px">Target:</span>
+            <button id="chatChip_all" class="chat-chip active" onclick="setChatAgent(null)">🧠 CIO (General)</button>
+            <span id="chatAgentChips"></span>
+          </div>
+          <!-- Messages -->
+          <div id="chatMessages" style="min-height:60px;max-height:480px;overflow-y:auto;margin-bottom:12px;display:flex;flex-direction:column;gap:12px"></div>
+          <!-- Input -->
+          <div style="display:flex;gap:8px;align-items:flex-end">
+            <textarea id="chatInput" rows="2" placeholder="Ask a question or add context for re-analysis..." style="flex:1;font-size:12px;font-family:var(--font-mono);resize:vertical;min-height:52px"></textarea>
+            <div style="display:flex;flex-direction:column;gap:6px">
+              <button class="btn btn-primary btn-sm" onclick="sendChat()" id="btnSendChat" style="white-space:nowrap">Send ↵</button>
+              <button class="btn btn-ghost btn-sm" onclick="rerunTargetAgent()" id="btnRerun" style="white-space:nowrap;display:none">↻ Re-run</button>
+            </div>
+          </div>
+        </div>
+
         <!-- Live debate -->
         <div id="liveDebate" class="hidden">
           <p class="synth-label" style="margin-bottom:12px">Committee Deliberating</p>
@@ -435,6 +477,10 @@ const { getActiveAgents, buildAgentSystemPrompt } = window.AgentsModule;
 const { getModeById, loadModes } = window.ModesModule;
 
 let currentMode = 'private';
+// Chat state
+let chatHistory   = [];   // {role, agentId, agentName, content}[]
+let chatAgentId   = null; // currently targeted agent (null = CIO general)
+let lastAnalysis  = null; // {target, mode, research, debate, synthesis}
 let currentLang = 'en';   // 'en' | 'ja'
 let isRunning    = false;
 let liveAgentEls = {};
@@ -980,10 +1026,10 @@ Structure your response:
 4. Score: X/10 (10 = strong conviction buy, 1 = strong avoid)
 5. Return estimate: ${mode.returnMetric} — Bull/Base/Bear scenarios
 
-Be direct and specific. 200-300 words.${langNote}`;
+Be direct and specific. 300-400 words.${langNote}`;
 
     try {
-      const text = await callClaude({ prompt, system, maxTokens: 700 });
+      const text = await callClaude({ prompt, system, maxTokens: 1200 });
       bodyEl.classList.remove('streaming');
       bodyEl.innerHTML = md(text);
       results[agent.id] = { agent, text };
@@ -1307,6 +1353,214 @@ function renderResults(target, mode, research, debate, synthesis) {
       </div>
     `;
   }).join('') || `<div style="padding:20px;color:var(--text-3);font-size:12px">No structured research data available. Raw data may be in agent responses.</div>`;
+
+  // Store for chat context
+  lastAnalysis = { target, mode, research, debate, synthesis };
+  initChat(target, mode, debate);
+}
+
+// ── Chat / Discussion ─────────────────────────────────
+function initChat(target, mode, debate) {
+  chatHistory = [];
+  chatAgentId = null;
+  document.getElementById('chatSection').classList.remove('hidden');
+  document.getElementById('chatMessages').innerHTML = '';
+
+  // Build agent chips
+  const agents = getActiveAgents().filter(a => debate && debate[a.id] && !debate[a.id].text?.startsWith('['));
+  document.getElementById('chatAgentChips').innerHTML = agents.map(a =>
+    `<button id="chatChip_${a.id}" class="chat-chip" onclick="setChatAgent('${a.id}')" title="${a.role.en}">${a.emoji} ${a.name.en}</button>`
+  ).join('');
+
+  // Enter to send (Shift+Enter = newline)
+  const inp = document.getElementById('chatInput');
+  inp.onkeydown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
+  };
+}
+
+function setChatAgent(agentId) {
+  chatAgentId = agentId;
+  document.querySelectorAll('.chat-chip').forEach(c => c.classList.remove('active'));
+  const chip = document.getElementById(agentId ? `chatChip_${agentId}` : 'chatChip_all');
+  if (chip) chip.classList.add('active');
+  document.getElementById('btnRerun').style.display = agentId ? 'block' : 'none';
+  document.getElementById('chatInput').placeholder = agentId
+    ? `Add new information or challenge ${getActiveAgents().find(a=>a.id===agentId)?.name.en||'agent'}...`
+    : 'Ask a question about this analysis...';
+}
+
+function addChatBubble(role, label, content, extra) {
+  const el = document.getElementById('chatMessages');
+  const div = document.createElement('div');
+  div.className = 'chat-msg';
+  div.innerHTML = `
+    <div class="chat-msg-label">${label}</div>
+    <div class="chat-msg-bubble ${role} ${extra||''}">${role==='user' ? escHtml(content) : md(content)}</div>
+  `;
+  el.appendChild(div);
+  el.scrollTop = el.scrollHeight;
+  return div;
+}
+
+async function sendChat() {
+  const input = document.getElementById('chatInput').value.trim();
+  if (!input || !lastAnalysis) return;
+
+  const cfg = loadConfig();
+  if (!cfg.apiKey) { showError('API key not set. Go to Settings.'); return; }
+
+  document.getElementById('btnSendChat').disabled = true;
+  addChatBubble('user', 'You', input);
+  chatHistory.push({ role: 'user', agentId: chatAgentId, content: input });
+  document.getElementById('chatInput').value = '';
+
+  // Build thinking bubble
+  const thinking = addChatBubble('assistant', '...', 'Thinking...', 'thinking');
+
+  try {
+    const { target, mode, research, debate, synthesis } = lastAnalysis;
+    const resSummary = buildResearchSummary(research);
+    const synthSummary = `Verdict: ${synthesis.verdict} (${synthesis.score}/10)\nHeadline: ${synthesis.headline}\nRecommendation: ${synthesis.recommendation}`;
+    const chatCtx = chatHistory.slice(0,-1).map(m=>`${m.role==='user'?'User':m.agentName||'Assistant'}: ${m.content}`).join('\n');
+
+    let response, agentLabel;
+
+    if (chatAgentId) {
+      // Targeted agent: respond IN CHARACTER, incorporating new info
+      const agent = getActiveAgents().find(a => a.id === chatAgentId);
+      agentLabel = `${agent.emoji} ${agent.name.en}`;
+      const existingOpinion = debate[chatAgentId]?.text || '';
+      const system = buildAgentSystemPrompt(agent, mode);
+      const prompt = `Company: "${target}" (${mode.label.en})
+
+Research summary:
+${resSummary}
+
+Your previous analysis:
+${existingOpinion}
+
+${chatCtx ? 'Previous discussion:\n' + chatCtx + '\n\n' : ''}New information / challenge from user:
+${input}
+
+Respond in character as ${agent.name.en} (${agent.role.en}). Address the user's point directly. If new information changes your view, explain why. 150-250 words.${getLangInstruction()}`;
+
+      response = await callClaude({ prompt, system, maxTokens: 900 });
+    } else {
+      // CIO general Q&A
+      agentLabel = '🏛 CIO';
+      const debateSummary = getActiveAgents().map(a => {
+        const r = debate?.[a.id];
+        return r ? `${a.name.en}: ${r.text.slice(0,300)}` : '';
+      }).filter(Boolean).join('\n\n');
+
+      const prompt = `You are the Chief Investment Officer who just completed a ${mode.label.en} analysis of "${target}".
+
+Research summary:
+${resSummary}
+
+Committee synthesis:
+${synthSummary}
+
+Agent debate summary:
+${debateSummary}
+
+${chatCtx ? 'Previous discussion:\n' + chatCtx + '\n\n' : ''}User question:
+${input}
+
+Answer the user's question based on the analysis above. Be specific and cite relevant data points. 150-300 words.${getLangInstruction()}`;
+
+      response = await callClaude({ prompt, maxTokens: 900 });
+    }
+
+    // Replace thinking bubble
+    thinking.querySelector('.chat-msg-label').textContent = agentLabel;
+    thinking.querySelector('.chat-msg-bubble').classList.remove('thinking');
+    thinking.querySelector('.chat-msg-bubble').innerHTML = md(response);
+    document.getElementById('chatMessages').scrollTop = 9999;
+
+    chatHistory.push({ role: 'assistant', agentId: chatAgentId, agentName: agentLabel, content: response });
+
+  } catch(err) {
+    thinking.querySelector('.chat-msg-bubble').textContent = 'Error: ' + (err.message || 'unknown');
+    thinking.querySelector('.chat-msg-bubble').style.color = 'var(--red)';
+  } finally {
+    document.getElementById('btnSendChat').disabled = false;
+  }
+}
+
+async function rerunTargetAgent() {
+  if (!chatAgentId || !lastAnalysis) return;
+  const input = document.getElementById('chatInput').value.trim();
+  if (!input) { showToast('Enter new context for the agent to consider.'); return; }
+
+  const cfg = loadConfig();
+  if (!cfg.apiKey) { showError('API key not set.'); return; }
+
+  const { target, mode, research, debate, synthesis } = lastAnalysis;
+  const agent = getActiveAgents().find(a => a.id === chatAgentId);
+  if (!agent) return;
+
+  document.getElementById('btnRerun').disabled = true;
+  document.getElementById('btnSendChat').disabled = true;
+  addChatBubble('user', 'You', `[Re-run request for ${agent.name.en}]\n${input}`);
+  chatHistory.push({ role: 'user', agentId: chatAgentId, content: input, rerun: true });
+  document.getElementById('chatInput').value = '';
+
+  const thinking = addChatBubble('assistant', `↻ Re-running ${agent.emoji} ${agent.name.en}...`, 'Analysing with new context...', 'thinking');
+
+  try {
+    const resSummary = buildResearchSummary(research);
+    const chatCtx = chatHistory.slice(0,-1)
+      .filter(m=>m.agentId===chatAgentId)
+      .map(m=>`${m.role==='user'?'User':m.agentName}: ${m.content}`).join('\n');
+
+    const system = buildAgentSystemPrompt(agent, mode);
+    const prompt = `Company under analysis: "${target}" (Mode: ${mode.label.en})
+
+Research summary:
+${resSummary}
+
+${chatCtx ? 'Prior discussion context:\n' + chatCtx + '\n\n' : ''}NEW ADDITIONAL INFORMATION (incorporate this into your analysis):
+${input}
+
+As ${agent.name.en} (${agent.role.en}), provide a REVISED investment opinion incorporating the new information above.
+Structure your response:
+1. Key Thesis (2-3 sentences — updated if new info changes your view)
+2. Top 3 supporting points (bullet format)
+3. Top 2 concerns / risks
+4. Score: X/10 (10 = strong conviction buy, 1 = strong avoid)
+5. Return estimate: ${mode.returnMetric} — Bull/Base/Bear scenarios
+
+Be direct and specific. 300-400 words.${getLangInstruction()}`;
+
+    const newText = await callClaude({ prompt, system, maxTokens: 1200 });
+
+    // Update debate card in UI
+    const cardBody = document.getElementById(`liveBody_${chatAgentId}`);
+    if (cardBody) cardBody.innerHTML = md(newText);
+    // Also update the rendered debate grid
+    const debateCard = document.querySelector(`#debateGrid .agent-card:nth-child(${getActiveAgents().findIndex(a=>a.id===chatAgentId)+1}) .agent-card-body`);
+    if (debateCard) debateCard.innerHTML = md(newText);
+
+    // Update lastAnalysis debate
+    lastAnalysis.debate[chatAgentId] = { ...lastAnalysis.debate[chatAgentId], text: newText };
+
+    thinking.querySelector('.chat-msg-label').textContent = `↻ ${agent.emoji} ${agent.name.en} (revised)`;
+    thinking.querySelector('.chat-msg-bubble').classList.remove('thinking');
+    thinking.querySelector('.chat-msg-bubble').innerHTML = md(newText);
+    document.getElementById('chatMessages').scrollTop = 9999;
+
+    chatHistory.push({ role: 'assistant', agentId: chatAgentId, agentName: `${agent.emoji} ${agent.name.en}`, content: newText, rerun: true });
+    showToast(`${agent.name.en} re-analysed ✓`);
+
+  } catch(err) {
+    thinking.querySelector('.chat-msg-bubble').textContent = 'Re-run failed: ' + (err.message || 'unknown');
+    thinking.querySelector('.chat-msg-bubble').style.color = 'var(--red)';
+  } finally {
+    document.getElementById('btnRerun').disabled = false;
+    document.getElementById('btnSendChat').disabled = false;
+  }
 }
 
 // ── Load existing result ──────────────────────────────

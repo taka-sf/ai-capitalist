@@ -167,9 +167,19 @@ function saveAnalysis(result) {
   // 1. Always save locally first (instant, offline-safe)
   let local = [];
   try { local = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'); } catch(e) {}
-  // Replace existing entry with same id, or prepend
+  // Replace existing entry with same id, or prepend (deduplicate by id)
   const idx = local.findIndex(r => r.id && r.id === entry.id);
-  if (idx >= 0) local[idx] = entry; else local.unshift(entry);
+  if (idx >= 0) { local[idx] = entry; } else { local.unshift(entry); }
+  // Remove any stale entries with same name+mode saved within 60 seconds (double-save guard)
+  const cutoff = new Date(entry.savedAt).getTime() - 60000;
+  local = local.filter((r, i) => {
+    if (i === 0) return true; // keep the new entry
+    const rTime = new Date(r.savedAt || 0).getTime();
+    const isDupe = r.name === entry.name && r.mode === entry.mode &&
+                   r.verdict === entry.verdict && String(r.score) === String(entry.score) &&
+                   rTime > cutoff;
+    return !isDupe;
+  });
   if (local.length > 200) local = local.slice(0, 200);
   localStorage.setItem(HISTORY_KEY, JSON.stringify(local));
 
@@ -192,7 +202,7 @@ function saveAnalysis(result) {
 async function loadHistory() {
   const local = loadLocalHistory_();
   const cfg   = loadConfig();
-  if (!cfg.gasUrl) return local;
+  if (!cfg.gasUrl) return dedupeHistory_(local);
 
   try {
     const res  = await gasPost_(cfg.gasUrl, { action: 'getHistory', limit: 200 });
@@ -200,7 +210,7 @@ async function loadHistory() {
       // Merge: cloud is source-of-truth; add any local-only entries not yet synced
       const cloudIds = new Set(res.history.map(r => r.id));
       const localOnly = local.filter(r => r.id && !cloudIds.has(r.id));
-      const merged = [...res.history, ...localOnly];
+      const merged = dedupeHistory_([...res.history, ...localOnly]);
       // Sort newest-first
       merged.sort((a, b) => (b.savedAt || '') > (a.savedAt || '') ? 1 : -1);
       // Refresh cache
@@ -215,7 +225,19 @@ async function loadHistory() {
   } catch(e) {
     console.warn('[GAS sync] loadHistory failed, using local cache:', e.message);
   }
-  return local;
+  return dedupeHistory_(local);
+}
+
+/** Remove exact duplicate entries (same id, or same name+mode+verdict+score saved within 5 minutes) */
+function dedupeHistory_(arr) {
+  const seen = new Map();
+  return arr.filter(item => {
+    if (!item) return false;
+    // Primary key: exact id
+    if (item.id && seen.has(item.id)) return false;
+    if (item.id) seen.set(item.id, true);
+    return true;
+  });
 }
 
 /** Delete a single analysis (local + cloud). */
