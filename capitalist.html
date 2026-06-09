@@ -813,14 +813,15 @@ CRITICAL INSTRUCTIONS:
 - If public data is scarce (private company, SME, early-stage startup), use the additional context provided, industry benchmarks, comparable companies, and reasonable estimates. NEVER leave a field empty or null.
 - Clearly mark estimates with "(est.)" so readers know the confidence level.
 - Do not refuse or skip fields due to data unavailability — always provide your best professional assessment.
+- Each field value must be a plain text string. Do NOT nest JSON objects or JSON strings inside field values.${langNote ? '\n- ' + langNote.trim() : ''}
 
-Return ONLY a valid JSON object with these exact keys (no markdown, no explanation outside JSON):
+Return ONLY a valid JSON object with these exact keys (no markdown, no preamble, start directly with {):
 {
   "companyName": "official name or best known name",
   "description": "2-sentence business description",
   "sector": "sector / industry",
   ${sections.map(s => `"${s.key}": "detailed findings for ${s.label.en} (2-4 sentences, use estimates if needed)"`).join(',\n  ')}
-}${langNote}`;
+}`;
 
   sections.forEach(s => {
     const el = document.getElementById('pill_' + s.key);
@@ -834,9 +835,14 @@ Return ONLY a valid JSON object with these exact keys (no markdown, no explanati
     if (el) { el.classList.remove('active'); el.classList.add('done'); }
   });
 
-  // Try to parse JSON; build a robust fallback if it fails
-  const parsed = safeJsonParse(raw);
-  if (parsed && typeof parsed === 'object') return parsed;
+  // Try to parse JSON; unwrap double-encoding; build fallback if needed
+  let parsed = safeJsonParse(raw);
+  if (parsed && typeof parsed === 'object') {
+    // Fix double-encoding: if a section field contains the full research JSON
+    const requiredKeys = ['companyName', 'description', 'sector', ...sections.map(s => s.key)];
+    parsed = unwrapDoubleEncoded(parsed, requiredKeys);
+    return parsed;
+  }
 
   // Fallback: distribute raw text across section keys so the UI can render
   const fallback = {
@@ -962,8 +968,9 @@ Company: "${target}"
 Agent debate:
 ${debateSummary}
 
-Synthesize the committee's views into a final investment memo.
-Return ONLY a JSON object (no markdown):
+Synthesize the committee's views into a final investment memo.${langNote ? '\nIMPORTANT: ' + langNote.trim() : ''}
+Return ONLY a JSON object (no markdown, no preamble, start directly with {).
+Each field value must be a plain text string — do NOT nest JSON inside field values.
 {
   "verdict": "STRONG_BUY|BUY|WATCH|PASS|STRONG_PASS",
   "score": 7.2,
@@ -976,47 +983,76 @@ Return ONLY a JSON object (no markdown):
   "return_bear": "${mode.returnMetric} bear scenario",
   "recommendation": "3-4 sentence final recommendation",
   "conviction": "HIGH|MEDIUM|LOW"
-}${langNote}`;
+}`;
 
   const raw    = await callClaude({ prompt, maxTokens: 900 });
-  const parsed = safeJsonParse(raw);
-  if (parsed) return parsed;
+  let parsed = safeJsonParse(raw);
+  if (parsed) {
+    const synthKeys = ['verdict', 'score', 'headline', 'bull_case', 'bear_case', 'recommendation'];
+    parsed = unwrapDoubleEncoded(parsed, synthKeys);
+    return parsed;
+  }
   // Fallback: strip JSON artifacts and show readable text
-  const cleanRaw = stripJsonArtifacts(raw);
+  const cleanRaw = cleanField(raw, null);
   return { verdict: 'WATCH', score: 5, headline: cleanRaw.slice(0, 160), recommendation: cleanRaw.slice(0, 600) };
 }
 
-// ── Strip JSON artifacts from field values ─────────────
-// Handles: ```json fences, prompt preamble text, raw JSON objects
-function stripJsonArtifacts(val) {
+// ── JSON double-encoding fix ──────────────────────────
+// When Claude wraps the full JSON inside a single field value (e.g. headline = "{...full JSON...}")
+// we detect this and re-use the inner object instead.
+function unwrapDoubleEncoded(obj, requiredKeys) {
+  if (!obj || typeof obj !== 'object') return obj;
+  for (const v of Object.values(obj)) {
+    if (typeof v !== 'string') continue;
+    const s = v.trim();
+    if (!s.startsWith('{')) continue;
+    try {
+      const inner = JSON.parse(s);
+      if (!inner || typeof inner !== 'object') continue;
+      // If inner has at least 2 of the required keys, it's the real object
+      const hits = requiredKeys.filter(k => k in inner).length;
+      if (hits >= 2) return inner;
+    } catch(e) {}
+  }
+  return obj;
+}
+
+// ── Clean a single field value: extract plain text from JSON-wrapped strings ──
+// e.g. synthesis.headline = '{"verdict":"WATCH","headline":"Real text"}' → "Real text"
+function cleanField(val, fieldKey) {
   if (!val) return '';
   let s = String(val).trim();
-  // Remove markdown code fences
-  s = s.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '');
-  s = s.replace(/^`+|`+$/g, '').trim();
-  // If the entire string is a JSON object, try to extract the most useful field
-  if ((s.startsWith('{') || s.startsWith('['))) {
+  // Remove markdown fences
+  s = s.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').replace(/^`+|`+$/g, '').trim();
+  // If value IS a JSON object, try to extract the same-key field, then fallback to longest string
+  if (s.startsWith('{')) {
     try {
-      const obj = JSON.parse(s);
-      if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
-        // Return the longest string value
-        const strs = Object.values(obj).filter(v => typeof v === 'string' && v.length > 10);
+      const inner = JSON.parse(s);
+      if (inner && typeof inner === 'object') {
+        // Same-key field (e.g. inner.headline when we're cleaning headline)
+        if (fieldKey && typeof inner[fieldKey] === 'string' && inner[fieldKey].length > 5) {
+          return inner[fieldKey];
+        }
+        // Longest meaningful string field
+        const strs = Object.values(inner)
+          .filter(v => typeof v === 'string' && v.length > 15 && !v.startsWith('{'));
         if (strs.length) return strs.sort((a,b) => b.length - a.length)[0];
       }
     } catch(e) {}
+    // JSON parse failed but string starts with { — strip leading JSON noise
+    const firstSentence = s.replace(/[{}"]/g, '').split(/[:,]/)[0].trim();
+    if (firstSentence.length > 10) return firstSentence;
   }
-  // Strip Japanese prompt preamble (e.g. "以下、収集した情報を基に...```json{")
-  // Find first { and check if there's substantial text before it
-  const jsonStart = s.search(/[{[`]/);
-  if (jsonStart > 30) {
-    const before = s.slice(0, jsonStart).trim();
-    // If the preamble text looks like a prompt instruction, strip from the { onwards
-    if (/収集|JSON|分析|回答|作成|プロフェッショナル/.test(before)) {
-      return before; // return just the preamble-free text
-    }
+  // Strip Japanese preamble text before JSON
+  const jsonStart = s.search(/\{/);
+  if (jsonStart > 40 && /収集|JSON|分析|回答|作成/.test(s.slice(0, jsonStart))) {
+    return s.slice(0, jsonStart).trim();
   }
   return s;
 }
+
+// ── Strip JSON artifacts (legacy alias) ──────────────
+function stripJsonArtifacts(val) { return cleanField(val, null); }
 
 // ── Render results ────────────────────────────────────
 function renderResults(target, mode, research, debate, synthesis) {
@@ -1039,7 +1075,7 @@ function renderResults(target, mode, research, debate, synthesis) {
     <div>
       <div class="verdict-label">Committee Verdict</div>
       <div class="verdict-badge-lg verdict ${vClass}">${v.replace('_',' ')}</div>
-      <div style="font-size:12px;color:var(--text-2);margin-top:8px;max-width:340px">${escHtml(synthesis.headline || '')}</div>
+      <div style="font-size:12px;color:var(--text-2);margin-top:8px;max-width:340px">${escHtml(cleanField(synthesis.headline, 'headline'))}</div>
     </div>
     <div class="score-ring" style="background:rgba(255,255,255,0.03);border:2px solid ${scoreBorder};color:${scoreColor}">${score}</div>
     <div>
@@ -1061,22 +1097,22 @@ function renderResults(target, mode, research, debate, synthesis) {
     </div>
   `;
 
-  // Synthesis tab — strip any JSON artifacts from fields before rendering
-  const cleanSynth = (v) => stripJsonArtifacts(v || '');
+  // Synthesis tab — extract plain text from any double-encoded field values
+  const cs = (key) => cleanField(synthesis[key], key);
   const risks = Array.isArray(synthesis.key_risks) ? synthesis.key_risks : [];
   document.getElementById('synthContent').innerHTML = `
     <div class="synthesis-section">
       <div class="synth-label">Recommendation</div>
-      <div class="synth-body">${md(cleanSynth(synthesis.recommendation))}</div>
+      <div class="synth-body">${md(cs('recommendation'))}</div>
     </div>
     <div class="summary-grid" style="margin-bottom:20px">
       <div class="synthesis-section">
         <div class="synth-label">Bull Case</div>
-        <div class="synth-body" style="font-size:12px">${md(cleanSynth(synthesis.bull_case))}</div>
+        <div class="synth-body" style="font-size:12px">${md(cs('bull_case'))}</div>
       </div>
       <div class="synthesis-section">
         <div class="synth-label">Bear Case</div>
-        <div class="synth-body" style="font-size:12px">${md(cleanSynth(synthesis.bear_case))}</div>
+        <div class="synth-body" style="font-size:12px">${md(cs('bear_case'))}</div>
       </div>
     </div>
     ${risks.length ? `
@@ -1111,12 +1147,12 @@ function renderResults(target, mode, research, debate, synthesis) {
     `;
   }).join('');
 
-  // Research tab — clean each field before rendering
+  // Research tab — extract plain text from each field (handles double-encoding)
   const resSections = mode.researchSections.filter(s => s.enabled);
   document.getElementById('researchContent').innerHTML = resSections.map(s => {
     const rawVal = research[s.key];
     if (!rawVal) return '';
-    const cleanVal = stripJsonArtifacts(String(rawVal));
+    const cleanVal = cleanField(String(rawVal), s.key);
     if (!cleanVal) return '';
     return `
       <div style="margin-bottom:12px;padding:14px;border-radius:var(--radius-sm);background:var(--surface);border:1px solid var(--border)">
