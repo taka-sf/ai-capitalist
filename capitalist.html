@@ -320,6 +320,10 @@
 
               <!-- Manual text input -->
               <textarea id="contextInput" placeholder="Or paste text directly — financial data, pitch deck notes, news articles, due diligence findings..."></textarea>
+              <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+                <button class="btn btn-ghost btn-sm" style="font-size:11px;padding:4px 12px" onclick="applyNotes()">✓ Apply Notes</button>
+                <span id="notesAppliedBadge" style="display:none;font-size:10px;font-family:var(--font-mono);color:var(--green)">● Applied to next analysis</span>
+              </div>
               <p class="context-hint">All content above is shared with every agent as additional context. Especially useful for private companies and SMEs with limited public data.</p>
             </div>
           </div>
@@ -599,6 +603,23 @@ function getContext() {
   );
   const manual = (document.getElementById('contextInput').value || '').trim();
   return [...fileParts, manual].filter(Boolean).join('\n\n');
+}
+
+// ── Apply Notes button ────────────────────────────────
+function applyNotes() {
+  const ctx = getContext();
+  const badge = document.getElementById('notesAppliedBadge');
+  badge.style.display = ctx ? 'inline' : 'none';
+  if (ctx) {
+    badge.textContent = `● Applied (${ctx.length} chars)`;
+    // Auto-hide after 3s
+    setTimeout(() => { badge.style.display = 'none'; }, 3000);
+  } else {
+    badge.style.color = 'var(--text-3)';
+    badge.textContent = '(no content)';
+    badge.style.display = 'inline';
+    setTimeout(() => { badge.style.display = 'none'; }, 2000);
+  }
 }
 
 // ── Export menu ───────────────────────────────────────
@@ -959,7 +980,42 @@ Return ONLY a JSON object (no markdown):
 
   const raw    = await callClaude({ prompt, maxTokens: 900 });
   const parsed = safeJsonParse(raw);
-  return parsed || { verdict: 'WATCH', score: 5, headline: raw.slice(0, 200), recommendation: raw.slice(0, 400) };
+  if (parsed) return parsed;
+  // Fallback: strip JSON artifacts and show readable text
+  const cleanRaw = stripJsonArtifacts(raw);
+  return { verdict: 'WATCH', score: 5, headline: cleanRaw.slice(0, 160), recommendation: cleanRaw.slice(0, 600) };
+}
+
+// ── Strip JSON artifacts from field values ─────────────
+// Handles: ```json fences, prompt preamble text, raw JSON objects
+function stripJsonArtifacts(val) {
+  if (!val) return '';
+  let s = String(val).trim();
+  // Remove markdown code fences
+  s = s.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '');
+  s = s.replace(/^`+|`+$/g, '').trim();
+  // If the entire string is a JSON object, try to extract the most useful field
+  if ((s.startsWith('{') || s.startsWith('['))) {
+    try {
+      const obj = JSON.parse(s);
+      if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+        // Return the longest string value
+        const strs = Object.values(obj).filter(v => typeof v === 'string' && v.length > 10);
+        if (strs.length) return strs.sort((a,b) => b.length - a.length)[0];
+      }
+    } catch(e) {}
+  }
+  // Strip Japanese prompt preamble (e.g. "以下、収集した情報を基に...```json{")
+  // Find first { and check if there's substantial text before it
+  const jsonStart = s.search(/[{[`]/);
+  if (jsonStart > 30) {
+    const before = s.slice(0, jsonStart).trim();
+    // If the preamble text looks like a prompt instruction, strip from the { onwards
+    if (/収集|JSON|分析|回答|作成|プロフェッショナル/.test(before)) {
+      return before; // return just the preamble-free text
+    }
+  }
+  return s;
 }
 
 // ── Render results ────────────────────────────────────
@@ -1005,32 +1061,33 @@ function renderResults(target, mode, research, debate, synthesis) {
     </div>
   `;
 
-  // Synthesis tab
+  // Synthesis tab — strip any JSON artifacts from fields before rendering
+  const cleanSynth = (v) => stripJsonArtifacts(v || '');
   const risks = Array.isArray(synthesis.key_risks) ? synthesis.key_risks : [];
   document.getElementById('synthContent').innerHTML = `
     <div class="synthesis-section">
       <div class="synth-label">Recommendation</div>
-      <div class="synth-body">${md(synthesis.recommendation || '')}</div>
+      <div class="synth-body">${md(cleanSynth(synthesis.recommendation))}</div>
     </div>
-    <div style="display:grid;gap:16px;grid-template-columns:1fr 1fr;margin-bottom:20px">
+    <div class="summary-grid" style="margin-bottom:20px">
       <div class="synthesis-section">
         <div class="synth-label">Bull Case</div>
-        <div class="synth-body" style="font-size:12px">${md(synthesis.bull_case || '')}</div>
+        <div class="synth-body" style="font-size:12px">${md(cleanSynth(synthesis.bull_case))}</div>
       </div>
       <div class="synthesis-section">
         <div class="synth-label">Bear Case</div>
-        <div class="synth-body" style="font-size:12px">${md(synthesis.bear_case || '')}</div>
+        <div class="synth-body" style="font-size:12px">${md(cleanSynth(synthesis.bear_case))}</div>
       </div>
     </div>
     ${risks.length ? `
     <div class="synthesis-section">
       <div class="synth-label">Key Risks</div>
-      ${risks.map(r => `<div style="display:flex;gap:8px;margin-bottom:6px;font-size:12px;color:var(--text-2)"><span style="color:var(--red)">▲</span>${escHtml(r)}</div>`).join('')}
+      ${risks.map(r => `<div style="display:flex;gap:8px;margin-bottom:6px;font-size:12px;color:var(--text-2)"><span style="color:var(--red)">▲</span>${escHtml(String(r))}</div>`).join('')}
     </div>` : ''}
     ${research.description ? `
     <div class="synthesis-section">
       <div class="synth-label">Company Overview</div>
-      <div class="synth-body" style="font-size:12px;color:var(--text-2)">${escHtml(research.description)}</div>
+      <div class="synth-body" style="font-size:12px;color:var(--text-2)">${md(cleanSynth(research.description))}</div>
     </div>` : ''}
   `;
 
@@ -1054,15 +1111,17 @@ function renderResults(target, mode, research, debate, synthesis) {
     `;
   }).join('');
 
-  // Research tab
+  // Research tab — clean each field before rendering
   const resSections = mode.researchSections.filter(s => s.enabled);
   document.getElementById('researchContent').innerHTML = resSections.map(s => {
-    const val = research[s.key];
-    if (!val) return '';
+    const rawVal = research[s.key];
+    if (!rawVal) return '';
+    const cleanVal = stripJsonArtifacts(String(rawVal));
+    if (!cleanVal) return '';
     return `
-      <div style="margin-bottom:16px;padding:14px;border-radius:var(--radius-sm);background:var(--surface);border:1px solid var(--border)">
+      <div style="margin-bottom:12px;padding:14px;border-radius:var(--radius-sm);background:var(--surface);border:1px solid var(--border)">
         <div class="synth-label" style="margin-bottom:6px">${s.label.en}</div>
-        <div style="font-size:12px;color:var(--text-2);line-height:1.6">${md(String(val))}</div>
+        <div style="font-size:12px;color:var(--text-2);line-height:1.6">${md(cleanVal)}</div>
       </div>
     `;
   }).join('') || `<div style="padding:20px;color:var(--text-3);font-size:12px">No structured research data available. Raw data may be in agent responses.</div>`;
