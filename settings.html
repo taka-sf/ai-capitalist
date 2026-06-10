@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="shared/style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
 .settings-layout { display: grid; gap: 20px; }
 @media(min-width:860px) { .settings-layout { grid-template-columns: 200px 1fr; } }
@@ -176,7 +177,20 @@
               6. 生成された URL をここに貼り付けて保存
             </div>
             <div id="gasSyncStatus" style="display:none;margin-top:8px;font-size:12px;font-family:var(--font-mono)"></div>
-            <button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="testGasConnection()">接続テスト</button>
+            <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;align-items:center;">
+              <button class="btn btn-ghost btn-sm" onclick="testGasConnection()">接続テスト</button>
+              <button class="btn btn-ghost btn-sm" onclick="showGasQR()" id="btnShowQR" style="display:none">📱 他のデバイスに設定を共有</button>
+            </div>
+            <!-- QR code panel for cross-device setup -->
+            <div id="gasQRPanel" style="display:none;margin-top:14px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:16px;">
+              <div style="font-size:12px;font-weight:600;color:var(--text-1);margin-bottom:8px;">📱 他のデバイスでスキャン</div>
+              <div style="font-size:11px;color:var(--text-3);margin-bottom:12px;line-height:1.6;">
+                以下の QR コードを iPhone/iPad でスキャンすると、AI Capitalist が開き GAS URL が自動設定されます。<br>
+                <span style="color:var(--amber)">⚠ API キーは安全のため共有されません。各デバイスで個別に入力が必要です。</span>
+              </div>
+              <div id="gasQRCode" style="display:inline-block;background:#fff;padding:10px;border-radius:8px;"></div>
+              <div style="margin-top:10px;font-size:10px;font-family:var(--font-mono);color:var(--text-3);word-break:break-all;" id="gasQRUrl"></div>
+            </div>
           </div>
 
           <div class="section-block">
@@ -270,7 +284,19 @@ let agentsDraft = [];
 let modesDraft = [];
 
 // ── Init ──────────────────────────────────────────────
-function init() {
+async function init() {
+  // Check for ?gas= param (QR code scan from another device)
+  const params = new URLSearchParams(location.search);
+  const gasFromQR = params.get('gas');
+  if (gasFromQR) {
+    const cfg = loadConfig();
+    cfg.gasUrl = decodeURIComponent(gasFromQR);
+    saveConfig(cfg);
+    // Clean up URL
+    history.replaceState({}, '', location.pathname);
+    toast('GAS URL を設定しました。APIキーを入力して保存してください。');
+  }
+
   const cfg = loadConfig();
   document.getElementById('apiKey').value = cfg.apiKey || '';
   document.getElementById('model').value = cfg.model || 'claude-sonnet-4-5';
@@ -280,11 +306,56 @@ function init() {
   document.getElementById('notionDbId').value = cfg.notionDbId || '';
   setToggle('webSearch', cfg.webSearch !== false);
 
+  // Show QR share button if GAS URL is configured
+  if (cfg.gasUrl) {
+    document.getElementById('btnShowQR').style.display = '';
+  }
+
+  // If this is a fresh device (no API key) but has GAS URL, try to pull settings from cloud
+  if (cfg.gasUrl && !cfg.apiKey) {
+    try {
+      const res = await gasPost_(cfg.gasUrl, { action: 'getConfig' });
+      if (res?.ok && res.config) {
+        const merged = { ...cfg, ...res.config, apiKey: '' }; // never overwrite API key from cloud
+        saveConfig(merged);
+        document.getElementById('model').value = merged.model || 'claude-sonnet-4-5';
+        document.getElementById('language').value = merged.language || 'auto';
+        setToggle('webSearch', merged.webSearch !== false);
+        toast('クラウドから設定を読み込みました。APIキーを入力してください。');
+      }
+    } catch(e) { /* silently ignore */ }
+  }
+
   agentsDraft = loadAgents();
   modesDraft = loadModes();
 
   renderAgentEditors();
   renderModeEditors();
+}
+
+function showGasQR() {
+  const url = document.getElementById('gasUrl').value.trim() || loadConfig().gasUrl;
+  if (!url) { toast('GAS URL が設定されていません。'); return; }
+
+  const panel = document.getElementById('gasQRPanel');
+  panel.style.display = panel.style.display === 'none' ? '' : 'none';
+  if (panel.style.display === 'none') return;
+
+  // Build the setup URL: settings page with ?gas= param
+  const setupUrl = `${location.origin}${location.pathname}?gas=${encodeURIComponent(url)}`;
+  document.getElementById('gasQRUrl').textContent = setupUrl;
+
+  // Generate QR
+  const container = document.getElementById('gasQRCode');
+  container.innerHTML = '';
+  new QRCode(container, {
+    text: setupUrl,
+    width: 180,
+    height: 180,
+    colorDark: '#1a1a2e',
+    colorLight: '#ffffff',
+    correctLevel: QRCode.CorrectLevel.M
+  });
 }
 
 // ── Panel navigation ──────────────────────────────────
