@@ -1751,10 +1751,10 @@ async function loadExistingResult(id) {
     const history = await window.ConfigModule.loadHistory();
     const item = history.find(h => h.id === id);
     if (!item) {
-      // Fallback: check localStorage directly (in case cloud sync isn't set up)
-      const local = JSON.parse(localStorage.getItem('capitalist_history') || '[]');
+      // Fallback: check localStorage directly with correct key
+      const local = JSON.parse(localStorage.getItem('aic_history_v1') || '[]');
       const localItem = local.find(h => h.id === id);
-      if (!localItem) return;
+      if (!localItem) { console.warn('loadExistingResult: id not found:', id); return; }
       _renderHistoryItem(localItem);
       return;
     }

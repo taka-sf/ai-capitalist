@@ -270,7 +270,7 @@ function renderTable() {
   }
   empty.classList.add('hidden');
 
-  tbody.innerHTML = filteredHistory.map(item => {
+  tbody.innerHTML = filteredHistory.map((item, rowIdx) => {
     const mode = getModeById(item.mode || 'private');
     const modeClass = { private:'ab-private', public:'ab-public', sme:'ab-sme' }[item.mode] || 'ab-private';
     const v = item.verdict || '—';
@@ -278,24 +278,38 @@ function renderTable() {
     const score = item.score != null ? item.score : null;
     const scoreColor = score != null ? (score >= 7 ? 'var(--green)' : score >= 5 ? 'var(--amber)' : 'var(--red)') : 'var(--text-3)';
     const dateStr = item.savedAt ? new Date(item.savedAt).toLocaleString('ja-JP', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }).replace(/\//g,'/') : '';
+    const isCompare = !!item.compareData;
+    const openUrl = isCompare
+      ? `compare.html?id=${escAttr(item.id || '')}`
+      : `capitalist.html?id=${escAttr(item.id || '')}`;
+    // Compare entries show a special badge
+    const modeBadge = isCompare
+      ? `<span class="asset-badge" style="background:rgba(6,182,212,0.08);color:#06b6d4;border-color:rgba(6,182,212,0.25)">⚡ COMPARE</span>`
+      : `<span class="asset-badge ${modeClass}">${mode.icon} ${mode.id.toUpperCase()}</span>`;
     return `
-      <tr onclick="openModal('${escAttr(item.id || '')}')">
-        <td class="name-cell">${escHtml(item.name || 'Unknown')}</td>
-        <td><span class="asset-badge ${modeClass}">${mode.icon} ${mode.id.toUpperCase()}</span></td>
+      <tr onclick="openModal('${escAttr(item.id || '')}','${rowIdx}')">
+        <td class="name-cell">
+          <a href="${openUrl}" onclick="event.stopPropagation()" style="color:var(--text-1);text-decoration:none;font-weight:500;hover:color:var(--accent)"
+             onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--text-1)'">
+            ${escHtml(item.name || 'Unknown')}
+          </a>
+        </td>
+        <td>${modeBadge}</td>
         <td>${v !== '—' ? `<span class="verdict ${vClass}">${v.replace('_',' ')}</span>` : '<span class="text-muted">—</span>'}</td>
         <td class="score-cell" style="color:${scoreColor}">${score != null ? score : '—'}</td>
         <td style="color:var(--text-3)">${dateStr}</td>
         <td class="actions-cell">
-          <button class="btn-icon" title="Open in Analyse" onclick="event.stopPropagation();window.location='capitalist.html?id=${escAttr(item.id || '')}'">↗</button>
-          <button class="btn-icon" title="Delete" onclick="event.stopPropagation();deleteItem('${escAttr(item.id || '')}')">✕</button>
+          <a href="${openUrl}" class="btn-icon" title="分析を開く" onclick="event.stopPropagation()" style="text-decoration:none;font-size:11px;font-family:var(--font-mono);color:var(--text-2);padding:3px 8px;border:1px solid var(--border);border-radius:4px;white-space:nowrap;">Open</a>
+          <button class="btn-icon" title="削除" onclick="event.stopPropagation();deleteItem('${escAttr(item.id || '')}','${rowIdx}')">✕</button>
         </td>
       </tr>
     `;
   }).join('');
 }
 
-function openModal(id) {
-  const item = allHistory.find(h => h.id === id);
+function openModal(id, rowIdx) {
+  const item = id ? allHistory.find(h => h.id === id) : null
+    || filteredHistory[parseInt(rowIdx, 10)];
   if (!item) return;
 
   const mode = getModeById(item.mode || 'private');
@@ -319,7 +333,7 @@ function openModal(id) {
           ${score != null ? `<span style="font-family:var(--font-display);font-weight:700;color:${scoreColor}">${score}/10</span>` : ''}
         </div>
       </div>
-      <a href="capitalist.html?id=${escAttr(id)}" class="btn btn-ghost btn-sm" style="margin-left:auto">Open Full →</a>
+      <a href="${item.compareData ? 'compare.html' : 'capitalist.html'}?id=${escAttr(item.id||id)}" class="btn btn-ghost btn-sm" style="margin-left:auto">Open Full →</a>
     </div>
 
     ${synthesis.headline ? `<div style="font-size:14px;color:var(--text-2);margin-bottom:16px;padding:12px 14px;background:var(--surface);border-radius:var(--radius-sm);border:1px solid var(--border)">${escHtml(synthesis.headline)}</div>` : ''}
@@ -360,10 +374,22 @@ function closeModal(event, force) {
 
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(null, true); });
 
-async function deleteItem(id) {
-  if (!confirm('Delete this analysis?')) return;
-  await deleteAnalysis(id);   // removes from localStorage + GAS
-  allHistory = allHistory.filter(h => h.id !== id);
+async function deleteItem(id, rowIdx) {
+  if (!confirm('この分析を削除しますか？')) return;
+  if (id) {
+    await deleteAnalysis(id);
+    allHistory = allHistory.filter(h => h.id !== id);
+  } else {
+    // No ID — remove by row index from filteredHistory
+    const item = filteredHistory[parseInt(rowIdx, 10)];
+    if (item) {
+      // Remove from allHistory by reference equality
+      const idx = allHistory.indexOf(item);
+      if (idx >= 0) allHistory.splice(idx, 1);
+      // Persist updated local list
+      try { localStorage.setItem('aic_history_v1', JSON.stringify(allHistory)); } catch(e) {}
+    }
+  }
   applyFilters();
 }
 

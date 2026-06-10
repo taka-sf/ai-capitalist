@@ -119,10 +119,19 @@
     <p style="font-size:13px;color:var(--text-3);">Run side-by-side analysis of two companies with the full Investment Committee.</p>
   </div>
 
-  <!-- Mode selector -->
-  <div style="margin-bottom:16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-    <span style="font-size:11px;font-family:var(--font-mono);color:var(--text-3);letter-spacing:1px;text-transform:uppercase;">Mode</span>
-    <div id="modeSelector" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
+  <!-- Mode + Language selectors -->
+  <div style="margin-bottom:12px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+    <div style="display:flex;align-items:center;gap:8px;">
+      <span style="font-size:11px;font-family:var(--font-mono);color:var(--text-3);letter-spacing:1px;text-transform:uppercase;">Mode</span>
+      <div id="modeSelector" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <span style="font-size:11px;font-family:var(--font-mono);color:var(--text-3);letter-spacing:1px;text-transform:uppercase;">Language</span>
+      <div style="display:flex;gap:4px;">
+        <button id="langBtn_en" class="btn btn-ghost btn-sm" onclick="setLang('en')" style="font-size:11px;padding:3px 10px;">EN</button>
+        <button id="langBtn_ja" class="btn btn-ghost btn-sm" onclick="setLang('ja')" style="font-size:11px;padding:3px 10px;">日本語</button>
+      </div>
+    </div>
   </div>
 
   <!-- Inputs -->
@@ -130,20 +139,22 @@
     <div>
       <div class="compare-col-label">Company A</div>
       <div class="compare-input-row">
-        <input id="inputA" type="text" placeholder="e.g. OpenAI, NVDA, Stripe..." autocomplete="off" onkeydown="if(e.key==='Enter')startCompare()">
+        <input id="inputA" type="text" placeholder="e.g. OpenAI, NVDA, Stripe..." autocomplete="off"
+          onkeydown="if(event.key==='Enter'&&!event.isComposing)startCompare()">
       </div>
     </div>
     <div class="vs-badge">VS</div>
     <div>
       <div class="compare-col-label">Company B</div>
       <div class="compare-input-row">
-        <input id="inputB" type="text" placeholder="e.g. Anthropic, AMD, Adyen..." autocomplete="off" onkeydown="if(e.key==='Enter')startCompare()">
+        <input id="inputB" type="text" placeholder="e.g. Anthropic, AMD, Adyen..." autocomplete="off"
+          onkeydown="if(event.key==='Enter'&&!event.isComposing)startCompare()">
       </div>
     </div>
   </div>
   <div style="margin-top:12px;display:flex;gap:8px;align-items:center;">
     <button class="btn btn-primary" id="btnCompare" onclick="startCompare()">Compare →</button>
-    <span id="cmpStatus" style="font-size:12px;font-family:var(--font-mono);color:var(--text-3);"></span>
+    <span id="cmpStatus" style="font-size:12px;font-family:var(--font-mono);color:var(--text-3);display:flex;align-items:center;gap:6px;"></span>
   </div>
 
   <!-- Error -->
@@ -172,15 +183,20 @@
 <script>
 'use strict';
 
-const { loadConfig, callClaude } = window.ConfigModule;
+const { loadConfig, callClaude, loadHistory, saveAnalysis } = window.ConfigModule;
 const { getActiveAgents, buildAgentSystemPrompt } = window.AgentsModule;
 const { loadModes } = window.ModesModule;
 
 let selectedMode = null;
 let isRunning = false;
+let currentLang = 'en';  // 'en' | 'ja'
 
 // ── Init ──────────────────────────────────────────────
-function init() {
+async function init() {
+  const cfg = loadConfig();
+  // Default language from global setting
+  currentLang = cfg.language === 'ja' ? 'ja' : 'en';
+
   const modes = loadModes();
   selectedMode = modes[0];
   const sel = document.getElementById('modeSelector');
@@ -189,6 +205,15 @@ function init() {
       ${m.icon} ${m.label.en}
     </button>`).join('');
   updateModeButtons();
+  updateLangButtons();
+
+  // Check for ?id= param (load from History)
+  const params = new URLSearchParams(location.search);
+  const historyId = params.get('id');
+  if (historyId) {
+    history.replaceState({}, '', location.pathname);
+    await loadFromHistory(historyId);
+  }
 }
 
 function selectMode(id) {
@@ -201,6 +226,43 @@ function updateModeButtons() {
     b.classList.toggle('active', b.dataset.id === selectedMode.id);
     b.style.borderColor = b.dataset.id === selectedMode.id ? 'rgba(108,78,200,0.5)' : '';
   });
+}
+
+function setLang(lang) {
+  currentLang = lang;
+  updateLangButtons();
+}
+function updateLangButtons() {
+  ['en','ja'].forEach(l => {
+    const btn = document.getElementById('langBtn_' + l);
+    if (!btn) return;
+    const active = l === currentLang;
+    btn.style.borderColor = active ? 'rgba(108,78,200,0.5)' : '';
+    btn.style.color = active ? 'var(--accent)' : '';
+    btn.style.background = active ? 'var(--accent-dim)' : '';
+  });
+}
+
+// ── Load from History ─────────────────────────────────
+async function loadFromHistory(id) {
+  setStatus('Loading from history...');
+  try {
+    const hist = await loadHistory();
+    const item = hist.find(h => h.id === id);
+    if (!item?.compareData) { setStatus(''); return; }
+    const { nameA, nameB, resA, resB, debA, debB, synA, synB, agents, modeId } = item.compareData;
+    document.getElementById('inputA').value = nameA || '';
+    document.getElementById('inputB').value = nameB || '';
+    // Restore mode
+    const modes = loadModes();
+    selectedMode = modes.find(m => m.id === modeId) || modes[0];
+    updateModeButtons();
+    setStatus('');
+    renderComparison(nameA, nameB, resA, resB, debA, debB, synA, synB, agents);
+  } catch(e) {
+    setStatus('');
+    showCmpError('Failed to load history: ' + e.message);
+  }
 }
 
 // ── Run comparison ─────────────────────────────────────
@@ -245,6 +307,22 @@ async function startCompare() {
     setStatus('');
     renderComparison(nameA, nameB, resA, resB, debA, debB, synA, synB, agents);
 
+    // Save to History
+    try {
+      const higherScore = synA.score >= synB.score ? synA : synB;
+      const entry = {
+        id: 'cmp_' + Date.now() + '_' + Math.random().toString(36).slice(2,7),
+        name: `${nameA} vs ${nameB}`,
+        mode: selectedMode.id,
+        verdict: higherScore.verdict || 'WATCH',
+        score: higherScore.score || 5,
+        savedAt: new Date().toISOString(),
+        synthesis: higherScore,
+        compareData: { nameA, nameB, resA, resB, debA, debB, synA, synB, agents, modeId: selectedMode.id }
+      };
+      saveAnalysis(entry);
+    } catch(e) { console.warn('Compare: saveAnalysis failed', e); }
+
   } catch(err) {
     showCmpError(err.message || 'Unknown error');
   } finally {
@@ -262,7 +340,7 @@ async function runResearch(target, mode, cfg) {
     sme:     'Priority sources: company website, Google Maps reviews, LinkedIn, Glassdoor.'
   }[mode.id] || '';
 
-  const lang = cfg.language === 'ja' ? 'ja' : 'en';
+  const lang = currentLang;
   const langInline = lang === 'ja' ? ' (日本語で記述)' : '';
   const prompt = `Research "${target}" for investment analysis.
 ${mode.researchPromptExtra}
@@ -309,8 +387,7 @@ function parseResearch(raw, target, sections) {
 // ── Debate ────────────────────────────────────────────
 async function runDebate(target, mode, agents, research, cfg) {
   const resSummary = buildResSummary(research);
-  const cfg2 = loadConfig();
-  const lang = cfg2.language === 'ja' ? 'ja' : 'en';
+  const lang = currentLang;
   const langNote = lang === 'ja' ? '\n\nRespond entirely in Japanese (日本語で回答すること)。絵文字は使用しないこと。' : '\n\nRespond in English. No emoji.';
   const results = {};
 
@@ -338,8 +415,7 @@ Be direct. 200-300 words.${langNote}`;
 
 // ── Synthesis ─────────────────────────────────────────
 async function runSynthesis(target, mode, agents, debate) {
-  const cfg = loadConfig();
-  const lang = cfg.language === 'ja' ? 'ja' : 'en';
+  const lang = currentLang;
   const langInline = lang === 'ja' ? ' (日本語)' : '';
   const debSummary = agents.map(a => {
     const r = debate[a.id]; return r ? `=== ${a.name.en} ===\n${r.text}` : '';
