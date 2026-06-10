@@ -1748,17 +1748,32 @@ Be direct and specific. 300-400 words.${chatLangInstruction(input)}`;
 // ── Load existing result ──────────────────────────────
 async function loadExistingResult(id) {
   try {
-    const history = await window.ConfigModule.loadHistory();
-    const item = history.find(h => h.id === id);
-    if (!item) {
-      // Fallback: check localStorage directly with correct key
+    // 1. Check sessionStorage first (set by history.html on navigation — fastest, most reliable)
+    try {
+      const raw = sessionStorage.getItem('aic_open_item');
+      if (raw) {
+        sessionStorage.removeItem('aic_open_item');
+        const item = JSON.parse(raw);
+        if (item && (item.id === id || !id)) {
+          _renderHistoryItem(item);
+          return;
+        }
+      }
+    } catch(e) { /* sessionStorage not available */ }
+
+    // 2. Fallback: search localStorage directly (synchronous, reliable)
+    try {
       const local = JSON.parse(localStorage.getItem('aic_history_v1') || '[]');
       const localItem = local.find(h => h.id === id);
-      if (!localItem) { console.warn('loadExistingResult: id not found:', id); return; }
-      _renderHistoryItem(localItem);
-      return;
-    }
-    _renderHistoryItem(item);
+      if (localItem) { _renderHistoryItem(localItem); return; }
+    } catch(e) {}
+
+    // 3. Last resort: fetch from cloud history
+    const history = await window.ConfigModule.loadHistory();
+    const item = history.find(h => h.id === id);
+    if (item) { _renderHistoryItem(item); return; }
+
+    console.warn('loadExistingResult: id not found:', id);
   } catch(e) {
     console.error('loadExistingResult error:', e);
   }

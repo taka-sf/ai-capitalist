@@ -249,8 +249,28 @@ function updateLangButtons() {
 async function loadFromHistory(id) {
   setStatus('Loading from history...');
   try {
-    const hist = await loadHistory();
-    const item = hist.find(h => h.id === id);
+    // Check sessionStorage first (set by history.html)
+    let item = null;
+    try {
+      const raw = sessionStorage.getItem('aic_open_item');
+      if (raw) {
+        sessionStorage.removeItem('aic_open_item');
+        const candidate = JSON.parse(raw);
+        if (candidate && (candidate.id === id || !id)) item = candidate;
+      }
+    } catch(e) {}
+    // Fallback: localStorage
+    if (!item) {
+      try {
+        const local = JSON.parse(localStorage.getItem('aic_history_v1') || '[]');
+        item = local.find(h => h.id === id) || null;
+      } catch(e) {}
+    }
+    // Last resort: cloud
+    if (!item) {
+      const hist = await loadHistory();
+      item = hist.find(h => h.id === id) || null;
+    }
     if (!item?.compareData) { setStatus(''); return; }
     const { nameA, nameB, resA, resB, debA, debB, synA, synB, agents, modeId } = item.compareData;
     document.getElementById('inputA').value = nameA || '';

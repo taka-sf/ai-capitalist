@@ -300,7 +300,8 @@ function renderTable() {
     return `
       <tr data-id="${escAttr(item.id || '')}" data-rowidx="${rowIdx}" onclick="handleRowClick(this)">
         <td class="name-cell">
-          <a href="${openUrl}" onclick="event.stopPropagation()" style="color:var(--text-1);text-decoration:none;font-weight:500;"
+          <a href="#" onclick="event.preventDefault();event.stopPropagation();openHistoryItem('${escAttr(item.id || '')}','${rowIdx}')"
+             style="color:var(--text-1);text-decoration:none;font-weight:500;cursor:pointer;"
              onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--text-1)'">
             ${escHtml(item.name || 'Unknown')}
           </a>
@@ -310,7 +311,6 @@ function renderTable() {
         <td class="score-cell" style="color:${scoreColor}">${score != null ? score : '—'}</td>
         <td style="color:var(--text-3)">${dateStr}</td>
         <td class="actions-cell">
-          <a href="${openUrl}" class="btn-icon" title="分析を開く" onclick="event.stopPropagation()" style="text-decoration:none;font-size:11px;font-family:var(--font-mono);color:var(--text-2);padding:3px 8px;border:1px solid var(--border);border-radius:4px;white-space:nowrap;">Open</a>
           <button class="btn-icon" title="削除" data-id="${escAttr(item.id || '')}" data-rowidx="${rowIdx}" onclick="event.stopPropagation();handleDelete(this)">✕</button>
         </td>
       </tr>
@@ -326,6 +326,22 @@ function handleDelete(btn) {
   const id = btn.dataset.id;
   const rowIdx = btn.dataset.rowidx;
   deleteItem(id, rowIdx);
+}
+
+// Navigate to the analysis page with full item data in sessionStorage
+function openHistoryItem(id, rowIdx) {
+  const item = (id ? allHistory.find(h => h.id === id) : null)
+    || filteredHistory[parseInt(rowIdx, 10)];
+  if (!item) return;
+  try {
+    sessionStorage.setItem('aic_open_item', JSON.stringify(item));
+  } catch(e) { console.warn('sessionStorage write failed:', e); }
+  const isCompare = !!item.compareData;
+  if (isCompare) {
+    location.href = 'compare.html?id=' + encodeURIComponent(item.id || '');
+  } else {
+    location.href = 'capitalist.html?id=' + encodeURIComponent(item.id || '');
+  }
 }
 
 function openModal(id, rowIdx) {
