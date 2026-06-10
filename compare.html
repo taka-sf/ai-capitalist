@@ -99,7 +99,8 @@
 </style>
 </head>
 <body>
-<nav class="nav-bar">
+<div class="page">
+<nav class="nav">
   <a href="index.html" class="nav-brand">
     <span class="nav-dot"></span>
     AI CAPITALIST
@@ -113,7 +114,7 @@
   </div>
 </nav>
 
-<main class="main-wrap" style="max-width:1100px">
+<div class="main" style="max-width:1100px">
   <div style="margin-bottom:20px;">
     <h2 style="font-size:22px;font-weight:800;color:var(--text-1);margin-bottom:6px;">Compare</h2>
     <p style="font-size:13px;color:var(--text-3);">Run side-by-side analysis of two companies with the full Investment Committee.</p>
@@ -175,7 +176,8 @@
     </div>
 
   </div>
-</main>
+</div><!-- .main -->
+</div><!-- .page -->
 
 <script src="shared/config.js"></script>
 <script src="shared/agents.js"></script>
@@ -503,6 +505,14 @@ function renderCol(colId, name, res, deb, syn, agents, color, label) {
   const risks = Array.isArray(syn.key_risks) ? syn.key_risks : [];
   const questions = Array.isArray(syn.key_questions) ? syn.key_questions : [];
 
+  // Build research sections
+  const resSections = selectedMode.researchSections ? selectedMode.researchSections.filter(s => s.enabled) : [];
+  const resRows = resSections.filter(s => res[s.key]).map(s => `
+    <div style="padding:10px 16px;border-bottom:1px solid var(--border);">
+      <div style="font-family:var(--font-mono);font-size:9px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-3);margin-bottom:4px;">${esc(s.label.en)}</div>
+      <div style="font-size:12px;color:var(--text-1);line-height:1.65;">${md2(cleanStr(res[s.key]))}</div>
+    </div>`).join('');
+
   col.innerHTML = `
     <!-- Header -->
     <div class="cmp-card" style="border-top:3px solid ${color}">
@@ -528,7 +538,7 @@ function renderCol(colId, name, res, deb, syn, agents, color, label) {
     <!-- Key Questions -->
     ${questions.length ? `
     <div class="cmp-card" style="border-color:rgba(108,78,200,0.2);">
-      <div class="cmp-card-header" style="color:var(--accent);">❓ Key Open Questions</div>
+      <div class="cmp-card-header" style="color:var(--accent);">Key Open Questions</div>
       <div class="cmp-card-body">
         ${questions.map((q,i) => `<div style="display:flex;gap:8px;margin-bottom:8px;font-size:12px;"><span style="color:var(--accent);font-weight:700;flex-shrink:0">Q${i+1}</span><span>${esc(cleanStr(String(q)))}</span></div>`).join('')}
       </div>
@@ -541,6 +551,13 @@ function renderCol(colId, name, res, deb, syn, agents, color, label) {
       <div class="cmp-card-body">
         ${risks.map(r => `<div style="display:flex;gap:8px;margin-bottom:6px;font-size:12px;"><span style="color:var(--red);flex-shrink:0">▲</span><span>${esc(cleanStr(String(r)))}</span></div>`).join('')}
       </div>
+    </div>` : ''}
+
+    <!-- Research Findings -->
+    ${resRows ? `
+    <div class="cmp-card">
+      <div class="cmp-card-header">Research Findings</div>
+      <div style="padding:0;">${resRows}</div>
     </div>` : ''}
 
     <!-- Agent Debate -->

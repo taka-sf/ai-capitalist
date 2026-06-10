@@ -202,6 +202,17 @@ async function init() {
     seenSig.add(sig);
     return true;
   });
+  // Assign ids to any items that are missing one, then persist
+  let needSave = false;
+  allHistory.forEach(item => {
+    if (!item.id) {
+      item.id = 'h_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+      needSave = true;
+    }
+  });
+  if (needSave) {
+    try { localStorage.setItem('aic_history_v1', JSON.stringify(allHistory)); } catch(e) {}
+  }
   applyFilters();
   // Show sync indicator
   if (cfg.gasUrl) {
@@ -287,9 +298,9 @@ function renderTable() {
       ? `<span class="asset-badge" style="background:rgba(6,182,212,0.08);color:#06b6d4;border-color:rgba(6,182,212,0.25)">⚡ COMPARE</span>`
       : `<span class="asset-badge ${modeClass}">${mode.icon} ${mode.id.toUpperCase()}</span>`;
     return `
-      <tr onclick="openModal('${escAttr(item.id || '')}','${rowIdx}')">
+      <tr data-id="${escAttr(item.id || '')}" data-rowidx="${rowIdx}" onclick="handleRowClick(this)">
         <td class="name-cell">
-          <a href="${openUrl}" onclick="event.stopPropagation()" style="color:var(--text-1);text-decoration:none;font-weight:500;hover:color:var(--accent)"
+          <a href="${openUrl}" onclick="event.stopPropagation()" style="color:var(--text-1);text-decoration:none;font-weight:500;"
              onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--text-1)'">
             ${escHtml(item.name || 'Unknown')}
           </a>
@@ -300,11 +311,21 @@ function renderTable() {
         <td style="color:var(--text-3)">${dateStr}</td>
         <td class="actions-cell">
           <a href="${openUrl}" class="btn-icon" title="分析を開く" onclick="event.stopPropagation()" style="text-decoration:none;font-size:11px;font-family:var(--font-mono);color:var(--text-2);padding:3px 8px;border:1px solid var(--border);border-radius:4px;white-space:nowrap;">Open</a>
-          <button class="btn-icon" title="削除" onclick="event.stopPropagation();deleteItem('${escAttr(item.id || '')}','${rowIdx}')">✕</button>
+          <button class="btn-icon" title="削除" data-id="${escAttr(item.id || '')}" data-rowidx="${rowIdx}" onclick="event.stopPropagation();handleDelete(this)">✕</button>
         </td>
       </tr>
     `;
   }).join('');
+}
+
+function handleRowClick(tr) {
+  openModal(tr.dataset.id, tr.dataset.rowidx);
+}
+
+function handleDelete(btn) {
+  const id = btn.dataset.id;
+  const rowIdx = btn.dataset.rowidx;
+  deleteItem(id, rowIdx);
 }
 
 function openModal(id, rowIdx) {
@@ -376,19 +397,32 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(n
 
 async function deleteItem(id, rowIdx) {
   if (!confirm('この分析を削除しますか？')) return;
-  if (id) {
-    await deleteAnalysis(id);
-    allHistory = allHistory.filter(h => h.id !== id);
-  } else {
-    // No ID — remove by row index from filteredHistory
-    const item = filteredHistory[parseInt(rowIdx, 10)];
-    if (item) {
-      // Remove from allHistory by reference equality
-      const idx = allHistory.indexOf(item);
-      if (idx >= 0) allHistory.splice(idx, 1);
-      // Persist updated local list
-      try { localStorage.setItem('aic_history_v1', JSON.stringify(allHistory)); } catch(e) {}
+  try {
+    if (id) {
+      // Remove from localStorage
+      let local = [];
+      try { local = JSON.parse(localStorage.getItem('aic_history_v1') || '[]'); } catch(e) {}
+      local = local.filter(r => r.id !== id);
+      localStorage.setItem('aic_history_v1', JSON.stringify(local));
+      // Also delete from GAS (non-blocking)
+      const cfg = loadConfig();
+      if (cfg.gasUrl) {
+        deleteAnalysis(id).catch(e => console.warn('GAS delete failed:', e));
+      }
+      allHistory = allHistory.filter(h => h.id !== id);
+    } else {
+      // No ID — remove by row index from filteredHistory
+      const item = filteredHistory[parseInt(rowIdx, 10)];
+      if (item) {
+        const idx = allHistory.indexOf(item);
+        if (idx >= 0) allHistory.splice(idx, 1);
+        try { localStorage.setItem('aic_history_v1', JSON.stringify(allHistory)); } catch(e) {}
+      }
     }
+  } catch(e) {
+    console.error('deleteItem error:', e);
+    alert('削除に失敗しました: ' + e.message);
+    return;
   }
   applyFilters();
 }
