@@ -281,7 +281,13 @@ function renderTable() {
   }
   empty.classList.add('hidden');
 
+  // Store items in a module-level map (rowIdx → item) to avoid id encoding issues in onclick
+  window._histItems = {};
+
   tbody.innerHTML = filteredHistory.map((item, rowIdx) => {
+    // Register item in map at render time
+    window._histItems[rowIdx] = item;
+
     const mode = getModeById(item.mode || 'private');
     const modeClass = { private:'ab-private', public:'ab-public', sme:'ab-sme' }[item.mode] || 'ab-private';
     const v = item.verdict || '—';
@@ -290,17 +296,14 @@ function renderTable() {
     const scoreColor = score != null ? (score >= 7 ? 'var(--green)' : score >= 5 ? 'var(--amber)' : 'var(--red)') : 'var(--text-3)';
     const dateStr = item.savedAt ? new Date(item.savedAt).toLocaleString('ja-JP', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }).replace(/\//g,'/') : '';
     const isCompare = !!item.compareData;
-    const openUrl = isCompare
-      ? `compare.html?id=${escAttr(item.id || '')}`
-      : `capitalist.html?id=${escAttr(item.id || '')}`;
     // Compare entries show a special badge
     const modeBadge = isCompare
       ? `<span class="asset-badge" style="background:rgba(6,182,212,0.08);color:#06b6d4;border-color:rgba(6,182,212,0.25)">⚡ COMPARE</span>`
       : `<span class="asset-badge ${modeClass}">${mode.icon} ${mode.id.toUpperCase()}</span>`;
     return `
-      <tr data-id="${escAttr(item.id || '')}" data-rowidx="${rowIdx}" onclick="handleRowClick(this)">
+      <tr data-rowidx="${rowIdx}" onclick="handleRowClick(this)">
         <td class="name-cell">
-          <a href="#" onclick="event.preventDefault();event.stopPropagation();openHistoryItem('${escAttr(item.id || '')}','${rowIdx}')"
+          <a href="#" onclick="event.preventDefault();event.stopPropagation();openHistoryItem(${rowIdx})"
              style="color:var(--text-1);text-decoration:none;font-weight:500;cursor:pointer;"
              onmouseover="this.style.color='var(--accent)'" onmouseout="this.style.color='var(--text-1)'">
             ${escHtml(item.name || 'Unknown')}
@@ -311,7 +314,7 @@ function renderTable() {
         <td class="score-cell" style="color:${scoreColor}">${score != null ? score : '—'}</td>
         <td style="color:var(--text-3)">${dateStr}</td>
         <td class="actions-cell">
-          <button class="btn-icon" title="削除" data-id="${escAttr(item.id || '')}" data-rowidx="${rowIdx}" onclick="event.stopPropagation();handleDelete(this)">✕</button>
+          <button class="btn-icon" title="削除" data-rowidx="${rowIdx}" onclick="event.stopPropagation();handleDelete(this)">✕</button>
         </td>
       </tr>
     `;
@@ -319,23 +322,27 @@ function renderTable() {
 }
 
 function handleRowClick(tr) {
-  openModal(tr.dataset.id, tr.dataset.rowidx);
+  const rowIdx = parseInt(tr.dataset.rowidx, 10);
+  const item = (window._histItems || {})[rowIdx];
+  if (!item) return;
+  openModal(item, rowIdx);
 }
 
 function handleDelete(btn) {
-  const id = btn.dataset.id;
-  const rowIdx = btn.dataset.rowidx;
-  deleteItem(id, rowIdx);
+  const rowIdx = parseInt(btn.dataset.rowidx, 10);
+  const item = (window._histItems || {})[rowIdx];
+  if (!item) return;
+  deleteItem(item.id || '', rowIdx);
 }
 
-// Navigate to the analysis page with full item data in sessionStorage
-function openHistoryItem(id, rowIdx) {
-  const item = (id ? allHistory.find(h => h.id === id) : null)
-    || filteredHistory[parseInt(rowIdx, 10)];
-  if (!item) return;
-  try {
-    sessionStorage.setItem('aic_open_item', JSON.stringify(item));
-  } catch(e) { console.warn('sessionStorage write failed:', e); }
+// Navigate to the analysis page — uses in-memory item map (no id encoding issues)
+function openHistoryItem(rowIdx) {
+  const item = (window._histItems || {})[rowIdx];
+  if (!item) { console.warn('openHistoryItem: no item at rowIdx', rowIdx); return; }
+
+  // Store full item in sessionStorage so destination page renders it instantly
+  try { sessionStorage.setItem('aic_open_item', JSON.stringify(item)); } catch(e) {}
+
   const isCompare = !!item.compareData;
   if (isCompare) {
     location.href = 'compare.html?id=' + encodeURIComponent(item.id || '');
@@ -344,10 +351,23 @@ function openHistoryItem(id, rowIdx) {
   }
 }
 
-function openModal(id, rowIdx) {
-  const item = id ? allHistory.find(h => h.id === id) : null
-    || filteredHistory[parseInt(rowIdx, 10)];
+let _currentModalItem = null;
+
+function openFromModal() {
+  if (!_currentModalItem) return;
+  closeModal(null, true);
+  try { sessionStorage.setItem('aic_open_item', JSON.stringify(_currentModalItem)); } catch(e) {}
+  const dest = _currentModalItem.compareData ? 'compare.html' : 'capitalist.html';
+  location.href = dest + '?id=' + encodeURIComponent(_currentModalItem.id || '');
+}
+
+function openModal(item, rowIdx) {
+  // Accept either an item object directly, or fall back to filteredHistory by rowIdx
+  if (!item || typeof item !== 'object') {
+    item = filteredHistory[parseInt(rowIdx, 10)];
+  }
   if (!item) return;
+  _currentModalItem = item;
 
   const mode = getModeById(item.mode || 'private');
   const modeClass = { private:'ab-private', public:'ab-public', sme:'ab-sme' }[item.mode] || 'ab-private';
@@ -370,7 +390,7 @@ function openModal(id, rowIdx) {
           ${score != null ? `<span style="font-family:var(--font-display);font-weight:700;color:${scoreColor}">${score}/10</span>` : ''}
         </div>
       </div>
-      <a href="${item.compareData ? 'compare.html' : 'capitalist.html'}?id=${escAttr(item.id||id)}" class="btn btn-ghost btn-sm" style="margin-left:auto">Open Full →</a>
+      <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="openFromModal()">Open Full →</button>
     </div>
 
     ${synthesis.headline ? `<div style="font-size:14px;color:var(--text-2);margin-bottom:16px;padding:12px 14px;background:var(--surface);border-radius:var(--radius-sm);border:1px solid var(--border)">${escHtml(synthesis.headline)}</div>` : ''}
