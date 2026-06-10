@@ -196,7 +196,6 @@ let currentLang = 'en';  // 'en' | 'ja'
 // ── Init ──────────────────────────────────────────────
 async function init() {
   const cfg = loadConfig();
-  // Default language from global setting
   currentLang = cfg.language === 'ja' ? 'ja' : 'en';
 
   const modes = loadModes();
@@ -209,7 +208,26 @@ async function init() {
   updateModeButtons();
   updateLangButtons();
 
-  // Check for ?id= param (load from History)
+  // ── Priority 1: sessionStorage relay (synchronous, set by history.html) ──
+  try {
+    const raw = sessionStorage.getItem('aic_open_item');
+    if (raw) {
+      sessionStorage.removeItem('aic_open_item');
+      const item = JSON.parse(raw);
+      if (item && item.compareData) {
+        const { nameA, nameB, resA, resB, debA, debB, synA, synB, agents, modeId } = item.compareData;
+        document.getElementById('inputA').value = nameA || '';
+        document.getElementById('inputB').value = nameB || '';
+        const foundMode = modes.find(m => m.id === modeId) || modes[0];
+        selectedMode = foundMode;
+        updateModeButtons();
+        renderComparison(nameA, nameB, resA, resB, debA, debB, synA, synB, agents);
+        return;
+      }
+    }
+  } catch(e) { console.warn('sessionStorage read failed:', e); }
+
+  // ── Priority 2: ?id= param ──
   const params = new URLSearchParams(location.search);
   const historyId = params.get('id');
   if (historyId) {

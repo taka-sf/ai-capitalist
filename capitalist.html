@@ -720,13 +720,30 @@ document.addEventListener('click', e => {
 // ── Init ─────────────────────────────────────────────
 function init() {
   renderAgentList();
-  selectMode('private');
   initDropZone();
 
   // Respect saved language preference
   const cfg = loadConfig();
   if (cfg.language === 'ja') setLang('ja');
 
+  // ── Priority 1: sessionStorage relay from History page (synchronous, most reliable) ──
+  try {
+    const raw = sessionStorage.getItem('aic_open_item');
+    if (raw) {
+      sessionStorage.removeItem('aic_open_item');
+      const item = JSON.parse(raw);
+      if (item && item.name) {
+        selectMode(item.mode || 'private');
+        document.getElementById('targetInput').value = item.name || '';
+        renderResults(item.name, getModeById(item.mode || 'private'),
+                      item.research || {}, item.debate || {}, item.synthesis || {});
+        return; // done — skip all other init paths
+      }
+    }
+  } catch(e) { console.warn('sessionStorage read failed:', e); }
+
+  // ── Priority 2: ?id= param — look up in localStorage ──
+  selectMode('private');
   const params = new URLSearchParams(location.search);
   if (params.get('q')) {
     document.getElementById('targetInput').value = params.get('q');
@@ -746,8 +763,8 @@ function init() {
         if (item && item.name) {
           document.getElementById('targetInput').value = item.name || '';
           selectMode(item.mode || 'private');
-          const mode = getModeById(item.mode || 'private');
-          renderResults(item.name, mode, item.research || {}, item.debate || {}, item.synthesis || {});
+          renderResults(item.name, getModeById(item.mode || 'private'),
+                        item.research || {}, item.debate || {}, item.synthesis || {});
         }
       }
     } catch(e) {}
