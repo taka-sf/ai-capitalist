@@ -92,6 +92,7 @@
     <div class="nav-links">
       <a href="index.html"      class="nav-link">Hub</a>
       <a href="capitalist.html" class="nav-link">Analyse</a>
+      <a href="compare.html"    class="nav-link">Compare</a>
       <a href="history.html"    class="nav-link">History</a>
       <a href="settings.html"   class="nav-link active">Settings</a>
     </div>
@@ -440,6 +441,32 @@ function renderAgentEditors() {
         </div>
       </div>
       <div class="agent-editor-body" id="agentBody_${idx}">
+        <!-- Stance slider -->
+        <div class="field">
+          <label class="field-label" style="display:flex;align-items:center;justify-content:space-between;">
+            Stance
+            <span id="stanceLabel_${idx}" style="font-family:var(--font-mono);font-size:11px;color:var(--accent)">${['','Very Conservative','Conservative','Neutral','Optimistic','Very Aggressive'][agent.stance||3]}</span>
+          </label>
+          <input type="range" id="agentStance_${idx}" min="1" max="5" value="${agent.stance||3}"
+            style="width:100%;accent-color:var(--accent);margin:4px 0;"
+            oninput="updateStanceLabel(${idx},this.value)">
+          <div style="display:flex;justify-content:space-between;font-size:9px;font-family:var(--font-mono);color:var(--text-3);margin-top:2px;">
+            <span>Conservative</span><span>Neutral</span><span>Aggressive</span>
+          </div>
+        </div>
+        <!-- Sector focus -->
+        <div class="field">
+          <label class="field-label">Sector Focus</label>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;" id="sectorPills_${idx}">
+            ${['general','tech','finance','healthcare','consumer','industrial'].map(s => `
+              <button class="btn btn-ghost btn-sm sector-pill" data-idx="${idx}" data-sector="${s}"
+                onclick="setSectorFocus(${idx},'${s}')"
+                style="${(agent.sectorFocus||'general')===s ? 'border-color:rgba(108,78,200,0.5);color:var(--accent);background:var(--accent-dim)' : ''}"
+              >${s.charAt(0).toUpperCase()+s.slice(1)}</button>`).join('')}
+          </div>
+          <div class="text-xs text-muted" style="margin-top:4px;">Adds sector-specific evaluation criteria to this agent's analysis.</div>
+        </div>
+        <!-- Persona -->
         <div class="field">
           <label class="field-label">Persona / System Prompt</label>
           <textarea id="agentPersona_${idx}" rows="4" style="font-size:12px;font-family:var(--font-mono)">${escHtml(agent.persona || '')}</textarea>
@@ -466,6 +493,23 @@ function toggleAgentEditor(idx) {
   body.classList.toggle('open');
 }
 
+const STANCE_LABELS = ['','Very Conservative','Conservative','Neutral','Optimistic','Very Aggressive'];
+function updateStanceLabel(idx, val) {
+  const el = document.getElementById('stanceLabel_' + idx);
+  if (el) el.textContent = STANCE_LABELS[val] || 'Neutral';
+}
+
+function setSectorFocus(idx, sector) {
+  agentsDraft[idx].sectorFocus = sector;
+  // Update pill styles
+  document.querySelectorAll(`#sectorPills_${idx} .sector-pill`).forEach(btn => {
+    const active = btn.dataset.sector === sector;
+    btn.style.borderColor = active ? 'rgba(108,78,200,0.5)' : '';
+    btn.style.color = active ? 'var(--accent)' : '';
+    btn.style.background = active ? 'var(--accent-dim)' : '';
+  });
+}
+
 function toggleAgent(idx) {
   agentsDraft[idx].enabled = !agentsDraft[idx].enabled;
   const toggleEl = document.getElementById('agentToggle_' + idx);
@@ -474,15 +518,18 @@ function toggleAgent(idx) {
 
 function saveAgentsSettings() {
   agentsDraft.forEach((agent, idx) => {
-    const p = document.getElementById('agentPersona_' + idx);
+    const p    = document.getElementById('agentPersona_' + idx);
     const priv = document.getElementById('agentPrivate_' + idx);
-    const pub = document.getElementById('agentPublic_' + idx);
-    const sme = document.getElementById('agentSme_' + idx);
-    if (p) agent.persona = p.value;
+    const pub  = document.getElementById('agentPublic_'  + idx);
+    const sme  = document.getElementById('agentSme_'     + idx);
+    const st   = document.getElementById('agentStance_'  + idx);
+    if (p)   agent.persona = p.value;
     if (!agent.modeOverrides) agent.modeOverrides = {};
     if (priv) agent.modeOverrides.private = priv.value;
     if (pub)  agent.modeOverrides.public  = pub.value;
     if (sme)  agent.modeOverrides.sme     = sme.value;
+    if (st)   agent.stance = parseInt(st.value, 10);
+    // sectorFocus already updated live via setSectorFocus()
   });
   saveAgents(agentsDraft);
   toast('Agents saved');

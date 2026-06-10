@@ -263,6 +263,7 @@
     <div class="nav-links">
       <a href="index.html"      class="nav-link hide-mobile" onclick="return navGuard(event)">Hub</a>
       <a href="capitalist.html" class="nav-link active">Analyse</a>
+      <a href="compare.html"    class="nav-link hide-mobile" onclick="return navGuard(event)">Compare</a>
       <a href="history.html"    class="nav-link hide-mobile" onclick="return navGuard(event)">History</a>
       <a href="settings.html"   class="nav-link" onclick="return navGuard(event)">Settings</a>
     </div>
@@ -908,21 +909,35 @@ async function runResearch(target, mode, cfg, extraContext) {
   const langNote = getLangInstruction();
   const langInline = currentLang === 'ja' ? ' (日本語で記述)' : '';
 
+  // Source guidance per mode
+  const sourceGuide = {
+    private: `Priority sources: Crunchbase (funding rounds, investors), LinkedIn (team size, founders), PitchBook, TechCrunch, company blog/press releases, Y Combinator profile if applicable, SEC EDGAR if US-based, Companies House if UK-based.`,
+    public:  `Priority sources: SEC EDGAR 10-K/10-Q filings, Bloomberg, Reuters, company IR page, earnings call transcripts, short-seller reports, analyst initiations.`,
+    sme:     `Priority sources: company website, Google Maps / Yelp reviews, local business registries, LinkedIn company page, Glassdoor, industry association data.`
+  }[mode.id] || '';
+
   const prompt = `Research "${target}" thoroughly for investment analysis.
 ${mode.researchPromptExtra}
 ${contextBlock}
+
+SEARCH STRATEGY — use these specific sources when available:
+${sourceGuide}
+Search for: "${target} funding", "${target} revenue", "${target} team", "${target} competitors", "${target} customers"${mode.id === 'public' ? `, "${target} 10-K", "${target} earnings"` : ''}.
+If data is unavailable, mark it "(est.)" with a reasoned estimate. Do NOT leave fields empty.
+
 CRITICAL INSTRUCTIONS:
-- You MUST populate every field. Use estimates marked "(est.)" if data is scarce.
+- You MUST populate every field with substantive content (not placeholder text).
 - Each field value must be a plain text string. Do NOT nest JSON inside field values.
 - All string values must be written in ${currentLang === 'ja' ? 'Japanese (日本語)' : 'English'}.
 - Monetary values: use short notation — $10bn, $2.5m, ¥500bn, €1.2bn, S$3bn, C$5bn, A$2bn, HK$10bn. Never write "100 billion dollars".
+- Cite your source inline where possible, e.g. "(Crunchbase, 2024)" or "(SEC 10-K 2023)".
 
 Return ONLY the JSON object below. Start with { on the first line. No preamble, no explanation, no markdown.
 {
   "companyName": "official company name${langInline}",
   "description": "2-sentence business description${langInline}",
   "sector": "sector / industry${langInline}",
-  ${sections.map(s => `"${s.key}": "detailed findings for ${s.label.en} (2-4 sentences)${langInline}"`).join(',\n  ')}
+  ${sections.map(s => `"${s.key}": "detailed findings for ${s.label.en} (2-4 sentences with source citations)${langInline}"`).join(',\n  ')}
 }`;
 
   sections.forEach(s => {
@@ -1113,26 +1128,52 @@ async function runSynthesis(target, mode, agents, debateResults, cfg) {
   }).filter(Boolean).join('\n\n').slice(0, 4000);
 
   const langInline = currentLang === 'ja' ? ' (日本語で記述)' : '';
-  const prompt = `You are the Chief Investment Officer chairing a ${mode.label.en} investment committee.
 
-Company: "${target}"
-Agent debate:
+  // Tally agent scores for vote count
+  const agentScores = agents.map(a => {
+    const r = debateResults[a.id];
+    if (!r) return null;
+    const m = r.text.match(/Score:\s*(\d+(?:\.\d+)?)\s*\/\s*10/i);
+    return m ? parseFloat(m[1]) : null;
+  }).filter(x => x !== null);
+  const voteBreakdown = agentScores.length
+    ? `Agent scores: ${agentScores.join(', ')} (avg ${(agentScores.reduce((a,b)=>a+b,0)/agentScores.length).toFixed(1)})`
+    : '';
+
+  const prompt = `You are the Chief Investment Officer chairing a formal ${mode.label.en} Investment Committee meeting.
+
+Company under review: "${target}"
+${voteBreakdown}
+
+Agent debate transcripts:
 ${debateSummary}
 
-Synthesize the committee's views. Write all string values in ${currentLang === 'ja' ? 'Japanese (日本語)' : 'English'}.
-Use short monetary notation: $10bn, $2.5m, ¥500bn, S$3bn, C$5bn, A$2bn, HK$10bn.
-Return ONLY the JSON object below. Start with { on the first line. No preamble, no explanation, no markdown.
+Your task: produce the official IC memo synthesizing all views.
+Write all string values in ${currentLang === 'ja' ? 'Japanese (日本語)' : 'English'}.
+Use short monetary notation: $10bn, $2.5m, ¥500bn, S$3bn.
+
+Count how many agents lean BUY/PASS/WATCH based on their scores:
+- BUY/STRONG_BUY = score ≥ 7
+- WATCH = score 5-6.9
+- PASS/STRONG_PASS = score < 5
+
+Return ONLY the JSON object below. Start with { on the first line. No preamble, no markdown.
 {
   "verdict": "STRONG_BUY|BUY|WATCH|PASS|STRONG_PASS",
   "score": 7.2,
   "headline": "One-sentence investment thesis${langInline}",
+  "votes_buy": 3,
+  "votes_watch": 2,
+  "votes_pass": 1,
   "bull_case": "2-3 sentences on the bull case${langInline}",
   "bear_case": "2-3 sentences on the bear case${langInline}",
   "key_risks": ["risk 1${langInline}", "risk 2${langInline}", "risk 3${langInline}"],
+  "key_questions": ["open question 1 that still needs resolution${langInline}", "open question 2${langInline}", "open question 3${langInline}"],
+  "minority_view": "1-2 sentences capturing the strongest dissenting opinion, if any${langInline}",
   "return_bull": "${mode.returnMetric} bull scenario${langInline}",
   "return_base": "${mode.returnMetric} base scenario${langInline}",
   "return_bear": "${mode.returnMetric} bear scenario${langInline}",
-  "recommendation": "3-4 sentence final recommendation${langInline}",
+  "recommendation": "3-4 sentence final IC recommendation with specific next steps${langInline}",
   "conviction": "HIGH|MEDIUM|LOW"
 }`;
 
@@ -1274,12 +1315,15 @@ function renderResults(target, mode, research, debate, synthesis) {
   // Step 2: deep-clean each string field in synthesis
   // (handles cases where individual fields still contain JSON strings after unwrap)
   const textFields = ['headline', 'bull_case', 'bear_case', 'recommendation', 'conviction',
-                      'return_bull', 'return_base', 'return_bear'];
+                      'return_bull', 'return_base', 'return_bear', 'minority_view'];
   textFields.forEach(k => {
-    if (typeof synthesis[k] === 'string') {
-      synthesis[k] = cleanField(synthesis[k], k);
-    }
+    if (typeof synthesis[k] === 'string') synthesis[k] = cleanField(synthesis[k], k);
   });
+  if (Array.isArray(synthesis.key_questions)) {
+    synthesis.key_questions = synthesis.key_questions.map(q =>
+      typeof q === 'string' ? cleanField(q, null) : String(q)
+    );
+  }
   // verdict must be one of the known tokens — strip JSON noise if needed
   if (typeof synthesis.verdict === 'string' && synthesis.verdict.startsWith('{')) {
     synthesis.verdict = 'WATCH';
@@ -1311,11 +1355,32 @@ function renderResults(target, mode, research, debate, synthesis) {
   const scoreColor  = score >= 7 ? 'var(--green)' : score >= 5 ? 'var(--amber)' : 'var(--red)';
   const scoreBorder = score >= 7 ? 'rgba(5,150,105,0.3)' : score >= 5 ? 'rgba(194,124,14,0.3)' : 'rgba(220,38,38,0.3)';
 
+  // Vote tally
+  const vBuy   = Number(synthesis.votes_buy   || 0);
+  const vWatch = Number(synthesis.votes_watch || 0);
+  const vPass  = Number(synthesis.votes_pass  || 0);
+  const totalVotes = vBuy + vWatch + vPass;
+  const voteBarHTML = totalVotes > 0 ? `
+    <div style="margin-top:10px;">
+      <div style="font-size:10px;font-family:var(--font-mono);color:var(--text-3);letter-spacing:1px;text-transform:uppercase;margin-bottom:5px;">Committee Vote</div>
+      <div style="display:flex;gap:3px;height:8px;border-radius:4px;overflow:hidden;width:160px;">
+        ${vBuy   ? `<div style="flex:${vBuy};background:var(--green);"></div>` : ''}
+        ${vWatch ? `<div style="flex:${vWatch};background:var(--amber);"></div>` : ''}
+        ${vPass  ? `<div style="flex:${vPass};background:var(--red);"></div>` : ''}
+      </div>
+      <div style="display:flex;gap:10px;margin-top:4px;font-size:10px;font-family:var(--font-mono);">
+        ${vBuy   ? `<span style="color:var(--green)">▲ ${vBuy} Buy</span>` : ''}
+        ${vWatch ? `<span style="color:var(--amber)">● ${vWatch} Watch</span>` : ''}
+        ${vPass  ? `<span style="color:var(--red)">▼ ${vPass} Pass</span>` : ''}
+      </div>
+    </div>` : '';
+
   document.getElementById('verdictBlock').innerHTML = `
     <div>
       <div class="verdict-label">Committee Verdict</div>
       <div class="verdict-badge-lg verdict ${vClass}">${v.replace('_',' ')}</div>
       <div style="font-size:12px;color:var(--text-1);margin-top:8px;max-width:340px">${escHtml(cleanField(synthesis.headline, 'headline'))}</div>
+      ${voteBarHTML}
     </div>
     <div class="score-ring" style="background:rgba(255,255,255,0.03);border:2px solid ${scoreBorder};color:${scoreColor}">${score}</div>
     <div>
@@ -1338,10 +1403,13 @@ function renderResults(target, mode, research, debate, synthesis) {
   `;
 
   // Synthesis tab — fields already cleaned above; render directly
-  const risks = Array.isArray(synthesis.key_risks) ? synthesis.key_risks : [];
+  const risks     = Array.isArray(synthesis.key_risks)     ? synthesis.key_risks     : [];
+  const questions = Array.isArray(synthesis.key_questions) ? synthesis.key_questions : [];
+  const minority  = cleanField(synthesis.minority_view || '', 'minority_view');
+
   document.getElementById('synthContent').innerHTML = `
     <div class="synthesis-section">
-      <div class="synth-label">Recommendation</div>
+      <div class="synth-label">IC Recommendation</div>
       <div class="synth-body">${md(synthesis.recommendation || '')}</div>
     </div>
     <div class="summary-grid" style="margin-bottom:20px">
@@ -1357,7 +1425,18 @@ function renderResults(target, mode, research, debate, synthesis) {
     ${risks.length ? `
     <div class="synthesis-section">
       <div class="synth-label">Key Risks</div>
-      ${risks.map(r => `<div style="display:flex;gap:8px;margin-bottom:6px;font-size:12px;color:var(--text-1)"><span style="color:var(--red)">▲</span>${escHtml(String(r))}</div>`).join('')}
+      ${risks.map(r => `<div style="display:flex;gap:8px;margin-bottom:6px;font-size:12px;color:var(--text-1)"><span style="color:var(--red);flex-shrink:0">▲</span><span>${escHtml(String(r))}</span></div>`).join('')}
+    </div>` : ''}
+    ${questions.length ? `
+    <div class="synthesis-section" style="background:rgba(108,78,200,0.04);border:1px solid rgba(108,78,200,0.15);border-radius:8px;padding:14px;">
+      <div class="synth-label" style="color:var(--accent)">❓ Key Open Questions</div>
+      <div style="font-size:11px;color:var(--text-3);margin-bottom:8px;font-family:var(--font-mono)">Issues that must be resolved before committing capital</div>
+      ${questions.map((q,i) => `<div style="display:flex;gap:8px;margin-bottom:8px;font-size:12px;color:var(--text-1)"><span style="color:var(--accent);font-weight:700;flex-shrink:0">Q${i+1}</span><span>${escHtml(String(q))}</span></div>`).join('')}
+    </div>` : ''}
+    ${minority ? `
+    <div class="synthesis-section" style="background:rgba(251,191,36,0.05);border:1px solid rgba(251,191,36,0.2);border-radius:8px;padding:14px;">
+      <div class="synth-label" style="color:var(--amber)">⚠ Minority View</div>
+      <div class="synth-body" style="font-size:12px;color:var(--text-2)">${md(minority)}</div>
     </div>` : ''}
     ${research.description ? `
     <div class="synthesis-section">

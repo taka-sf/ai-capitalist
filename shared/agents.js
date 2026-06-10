@@ -126,7 +126,27 @@ function getActiveAgents() {
 function buildAgentSystemPrompt(agent, modeDef) {
   const modeKey = modeDef.id;
   const override = agent.modeOverrides?.[modeKey] || '';
-  return `${agent.persona}\n\n${override}\n\n${modeDef.agentGuidance || ''}`.trim();
+
+  // Stance modifier (1=Very Conservative … 5=Very Aggressive)
+  let stanceNote = '';
+  const stance = agent.stance || 3;
+  if (stance <= 1)      stanceNote = 'STANCE: Apply an extremely conservative, capital-preservation lens. Weight downside risks heavily. Require strong evidence before any positive claim.';
+  else if (stance === 2) stanceNote = 'STANCE: Apply a conservative, risk-aware lens. Be skeptical of growth projections and flag execution risks prominently.';
+  else if (stance === 4) stanceNote = 'STANCE: Apply an optimistic, growth-oriented lens. Look for asymmetric upside and accept higher risk for higher return potential.';
+  else if (stance >= 5)  stanceNote = 'STANCE: Apply an aggressive, high-conviction lens. Champion transformative potential and tolerate significant uncertainty for exceptional upside.';
+
+  // Sector focus
+  const sectorMap = {
+    tech:       'SECTOR FOCUS — Technology: prioritise scalability, API/platform moat, developer ecosystem, AI/ML differentiation, cloud cost structure.',
+    finance:    'SECTOR FOCUS — Finance: prioritise regulatory capital, NIM dynamics, credit risk, fintech disruption, compliance burden.',
+    healthcare: 'SECTOR FOCUS — Healthcare: prioritise FDA pathway, clinical data, reimbursement landscape, IP timeline, payer concentration.',
+    consumer:   'SECTOR FOCUS — Consumer: prioritise brand loyalty, CAC/LTV, churn/retention, social proof/reviews, channel mix.',
+    industrial: 'SECTOR FOCUS — Industrial: prioritise capacity utilisation, capex intensity, supply chain resilience, cyclicality, ESG cost.',
+  };
+  const sectorNote = sectorMap[agent.sectorFocus || 'general'] || '';
+
+  const extras = [stanceNote, sectorNote].filter(Boolean).join('\n');
+  return `${agent.persona}\n\n${override}${extras ? '\n\n' + extras : ''}\n\n${modeDef.agentGuidance || ''}`.trim();
 }
 
 if (typeof window !== 'undefined') {
