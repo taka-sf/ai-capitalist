@@ -122,15 +122,17 @@ async function callClaude({ prompt, system, useSearch = false, maxTokens = 1400 
           '数分待ってから再度お試しください。'
         );
       }
-      // If web search caused auth/beta error, retry without it
-      if (useWebSearch && (res.status === 400 || res.status === 401)) {
-        console.warn('Web search unavailable, retrying without search:', err);
+      // If web search caused any error, retry without it
+      if (useWebSearch && (res.status === 400 || res.status === 401 || res.status === 500 || res.status === 529)) {
+        console.warn('Web search unavailable, retrying without search:', res.status, err);
         delete bodyBase.tools;
         delete headers['anthropic-beta'];
         messages = [{ role: 'user', content: prompt }];
         continue;
       }
-      throw new Error(err?.error?.message || `API error ${res.status}`);
+      const errMsg = err?.error?.message || `API error ${res.status}`;
+      console.error('Claude API error:', res.status, errMsg, err);
+      throw new Error(errMsg);
     }
 
     const data = await res.json();
