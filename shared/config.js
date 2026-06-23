@@ -5,7 +5,7 @@ const CONFIG_KEY = 'aic_config_v1';
 
 const DEFAULT_CONFIG = {
   apiKey:    '',
-  model:     'claude-sonnet-4-5',
+  model:     'claude-sonnet-4-6',
   webSearch: true,
   language:  'auto',
   notionToken:   '',
