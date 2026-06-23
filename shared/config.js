@@ -14,10 +14,25 @@ const DEFAULT_CONFIG = {
   gasUrl:    '',   // GAS Web App URL for cross-device sync
 };
 
+// Deprecated model IDs → replacement
+const MODEL_MIGRATIONS = {
+  'claude-sonnet-4-5': 'claude-sonnet-4-6',
+  'claude-opus-4-5':   'claude-opus-4-8',
+  'claude-haiku-4-5-20251001': 'claude-haiku-4-5',
+};
+
 function loadConfig() {
   try {
     const s = localStorage.getItem(CONFIG_KEY);
-    if (s) return { ...DEFAULT_CONFIG, ...JSON.parse(s) };
+    if (s) {
+      const saved = JSON.parse(s);
+      // Migrate deprecated model names
+      if (saved.model && MODEL_MIGRATIONS[saved.model]) {
+        saved.model = MODEL_MIGRATIONS[saved.model];
+        localStorage.setItem(CONFIG_KEY, JSON.stringify({ ...DEFAULT_CONFIG, ...saved }));
+      }
+      return { ...DEFAULT_CONFIG, ...saved };
+    }
   } catch(e) {}
   return { ...DEFAULT_CONFIG };
 }
