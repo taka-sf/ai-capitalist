@@ -1195,26 +1195,30 @@ Return ONLY the JSON object below. Start with { on the first line. No preamble, 
 }`;
 
   const synthSystem = 'You are a JSON API. Output ONLY a valid JSON object. No text before or after the JSON. No markdown. Start your response with { and end with }.';
-  const raw    = await callClaude({ prompt, system: synthSystem, maxTokens: 1500 });
-  let parsed = safeJsonParse(raw);
-  if (parsed) {
+
+  async function trySynth(extraInstruction) {
+    const p = extraInstruction ? prompt + '\n\n' + extraInstruction : prompt;
+    const raw = await callClaude({ prompt: p, system: synthSystem, maxTokens: 2800 });
     const synthKeys = ['verdict', 'score', 'headline', 'bull_case', 'bear_case', 'recommendation'];
-    parsed = unwrapDoubleEncoded(parsed, synthKeys);
-    return parsed;
+    let parsed = safeJsonParse(raw);
+    if (parsed) return unwrapDoubleEncoded(parsed, synthKeys);
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      try {
+        const embedded = JSON.parse(jsonMatch[0]);
+        if (embedded && typeof embedded === 'object') return unwrapDoubleEncoded(embedded, synthKeys);
+      } catch(e) {}
+    }
+    return null;
   }
-  // safeJsonParse failed — try regex extraction of embedded JSON
-  const jsonMatch = raw.match(/\{[\s\S]*\}/);
-  if (jsonMatch) {
-    try {
-      const embedded = JSON.parse(jsonMatch[0]);
-      if (embedded && typeof embedded === 'object') {
-        const synthKeys = ['verdict', 'score', 'headline', 'bull_case', 'bear_case', 'recommendation'];
-        return unwrapDoubleEncoded(embedded, synthKeys);
-      }
-    } catch(e) {}
+
+  let result = await trySynth();
+  if (!result) {
+    // Retry with a simpler instruction to enforce JSON-only output
+    await new Promise(r => setTimeout(r, 5000));
+    result = await trySynth('IMPORTANT: Output ONLY the raw JSON object. Absolutely no text outside the JSON braces. Start immediately with { and end with }.');
   }
-  // Ultimate fallback
-  return { verdict: 'WATCH', score: 5, headline: '(Analysis could not be parsed)', recommendation: raw.slice(0, 600) };
+  return result || { verdict: 'WATCH', score: 5, headline: '(Analysis could not be parsed)', recommendation: '' };
 }
 
 // ── JSON double-encoding fix ──────────────────────────

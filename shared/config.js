@@ -68,16 +68,12 @@ async function callClaude({ prompt, system, useSearch = false, maxTokens = 1400 
     'anthropic-version': '2023-06-01',
     'anthropic-dangerous-direct-browser-access': 'true',
   };
-  if (useWebSearch) {
-    headers['anthropic-beta'] = 'web-search-2025-03-05';
-  }
-
   let messages = [{ role: 'user', content: prompt }];
   const bodyBase = {
     model: cfg.model,
     max_tokens: maxTokens,
     ...(system ? { system } : {}),
-    ...(useWebSearch ? { tools: [{ type: 'web_search_20250305', name: 'web_search' }] } : {}),
+    ...(useWebSearch ? { tools: [{ type: 'web_search_20260209', name: 'web_search' }] } : {}),
   };
 
   // ── Rate-limit backoff helper ─────────────────────────
@@ -97,6 +93,13 @@ async function callClaude({ prompt, system, useSearch = false, maxTokens = 1400 
         body: JSON.stringify({ ...bodyBase, messages }),
       });
 
+      if ((res.status === 529 || res.status === 503) && rateRetries < RATE_BACKOFF_MS.length) {
+        const waitMs = RATE_BACKOFF_MS[rateRetries];
+        console.warn(`Server overloaded (${res.status}). Waiting ${waitMs / 1000}s before retry (attempt ${rateRetries + 1})...`);
+        await sleep(waitMs);
+        rateRetries++;
+        continue;
+      }
       if (res.status === 429 && rateRetries < RATE_BACKOFF_MS.length) {
         // Honour Retry-After header if present, otherwise use our schedule
         const retryAfterSec = parseInt(res.headers.get('retry-after') || '0', 10);
@@ -122,15 +125,7 @@ async function callClaude({ prompt, system, useSearch = false, maxTokens = 1400 
           '数分待ってから再度お試しください。'
         );
       }
-      // If web search caused any error, retry without it
-      if (useWebSearch && (res.status === 400 || res.status === 401 || res.status === 500 || res.status === 529)) {
-        console.warn('Web search unavailable, retrying without search:', res.status, err);
-        delete bodyBase.tools;
-        delete headers['anthropic-beta'];
-        messages = [{ role: 'user', content: prompt }];
-        continue;
-      }
-      const errMsg = err?.error?.message || `API error ${res.status}`;
+const errMsg = err?.error?.message || `API error ${res.status}`;
       console.error('Claude API error:', res.status, errMsg, err);
       throw new Error(errMsg);
     }
@@ -154,7 +149,7 @@ async function callClaude({ prompt, system, useSearch = false, maxTokens = 1400 
       const toolResults = toolUseBlocks.map(tu => ({
         type: 'tool_result',
         tool_use_id: tu.id,
-        content: tu.type === 'web_search_20250305' || tu.name === 'web_search'
+        content: tu.name === 'web_search'
           ? [] // server-side search; Anthropic injects results automatically
           : [{ type: 'text', text: 'Tool executed.' }],
       }));
