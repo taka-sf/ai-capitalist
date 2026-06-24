@@ -1147,19 +1147,20 @@ async function runSynthesis(target, mode, agents, debateResults, cfg) {
   const langInline = currentLang === 'ja' ? ' (日本語で記述)' : '';
 
   // Tally agent scores for vote count
-  const agentScores = agents.map(a => {
+  const totalAgents = agents.length;
+  const agentScoreList = agents.map(a => {
     const r = debateResults[a.id];
-    if (!r) return null;
+    if (!r) return `${a.name.en}: no response`;
     const m = r.text.match(/Score:\s*(\d+(?:\.\d+)?)\s*\/\s*10/i);
-    return m ? parseFloat(m[1]) : null;
-  }).filter(x => x !== null);
-  const voteBreakdown = agentScores.length
-    ? `Agent scores: ${agentScores.join(', ')} (avg ${(agentScores.reduce((a,b)=>a+b,0)/agentScores.length).toFixed(1)})`
-    : '';
+    return m ? `${a.name.en}: ${parseFloat(m[1])}/10` : `${a.name.en}: score unclear`;
+  });
+  const agentScores = agentScoreList.map(s => { const m = s.match(/([\d.]+)\/10/); return m ? parseFloat(m[1]) : null; }).filter(x => x !== null);
+  const voteBreakdown = `Total committee members: ${totalAgents}\nAgent scores:\n${agentScoreList.map(s=>'- '+s).join('\n')}`;
 
   const prompt = `You are the Chief Investment Officer chairing a formal ${mode.label.en} Investment Committee meeting.
 
 Company under review: "${target}"
+
 ${voteBreakdown}
 
 Agent debate transcripts:
@@ -1169,10 +1170,12 @@ Your task: produce the official IC memo synthesizing all views.
 Write all string values in ${currentLang === 'ja' ? 'Japanese (日本語)' : 'English'}.
 Use short monetary notation: $10bn, $2.5m, ¥500bn, S$3bn.
 
-Count how many agents lean BUY/PASS/WATCH based on their scores:
-- BUY/STRONG_BUY = score ≥ 7
-- WATCH = score 5-6.9
-- PASS/STRONG_PASS = score < 5
+Count votes for ALL ${totalAgents} committee members:
+- votes_buy: agents with score ≥ 7 (BUY / STRONG_BUY)
+- votes_watch: agents with score 5–6.9 (WATCH / NEUTRAL)
+- votes_pass: agents with score < 5 (PASS / STRONG_PASS)
+- votes_neutral: agents whose score is unclear or who explicitly abstained
+Total of votes_buy + votes_watch + votes_pass + votes_neutral MUST equal ${totalAgents}.
 
 Return ONLY the JSON object below. Start with { on the first line. No preamble, no markdown.
 {
@@ -1182,6 +1185,7 @@ Return ONLY the JSON object below. Start with { on the first line. No preamble, 
   "votes_buy": 3,
   "votes_watch": 2,
   "votes_pass": 1,
+  "votes_neutral": 0,
   "bull_case": "2-3 sentences on the bull case${langInline}",
   "bear_case": "2-3 sentences on the bear case${langInline}",
   "key_risks": ["risk 1${langInline}", "risk 2${langInline}", "risk 3${langInline}"],
@@ -1377,22 +1381,25 @@ function renderResults(target, mode, research, debate, synthesis) {
   const scoreBorder = score >= 7 ? 'rgba(5,150,105,0.3)' : score >= 5 ? 'rgba(194,124,14,0.3)' : 'rgba(220,38,38,0.3)';
 
   // Vote tally
-  const vBuy   = Number(synthesis.votes_buy   || 0);
-  const vWatch = Number(synthesis.votes_watch || 0);
-  const vPass  = Number(synthesis.votes_pass  || 0);
-  const totalVotes = vBuy + vWatch + vPass;
+  const vBuy     = Number(synthesis.votes_buy     || 0);
+  const vWatch   = Number(synthesis.votes_watch   || 0);
+  const vPass    = Number(synthesis.votes_pass    || 0);
+  const vNeutral = Number(synthesis.votes_neutral || 0);
+  const totalVotes = vBuy + vWatch + vPass + vNeutral;
   const voteBarHTML = totalVotes > 0 ? `
     <div style="margin-top:10px;">
       <div style="font-size:10px;font-family:var(--font-mono);color:var(--text-3);letter-spacing:1px;text-transform:uppercase;margin-bottom:5px;">Committee Vote</div>
       <div style="display:flex;gap:3px;height:8px;border-radius:4px;overflow:hidden;width:160px;">
-        ${vBuy   ? `<div style="flex:${vBuy};background:var(--green);"></div>` : ''}
-        ${vWatch ? `<div style="flex:${vWatch};background:var(--amber);"></div>` : ''}
-        ${vPass  ? `<div style="flex:${vPass};background:var(--red);"></div>` : ''}
+        ${vBuy     ? `<div style="flex:${vBuy};background:var(--green);"></div>` : ''}
+        ${vWatch   ? `<div style="flex:${vWatch};background:var(--amber);"></div>` : ''}
+        ${vPass    ? `<div style="flex:${vPass};background:var(--red);"></div>` : ''}
+        ${vNeutral ? `<div style="flex:${vNeutral};background:var(--text-3);"></div>` : ''}
       </div>
       <div style="display:flex;gap:10px;margin-top:4px;font-size:10px;font-family:var(--font-mono);">
-        ${vBuy   ? `<span style="color:var(--green)">▲ ${vBuy} Buy</span>` : ''}
-        ${vWatch ? `<span style="color:var(--amber)">● ${vWatch} Watch</span>` : ''}
-        ${vPass  ? `<span style="color:var(--red)">▼ ${vPass} Pass</span>` : ''}
+        ${vBuy     ? `<span style="color:var(--green)">▲ ${vBuy} Buy</span>` : ''}
+        ${vWatch   ? `<span style="color:var(--amber)">● ${vWatch} Watch</span>` : ''}
+        ${vPass    ? `<span style="color:var(--red)">▼ ${vPass} Pass</span>` : ''}
+        ${vNeutral ? `<span style="color:var(--text-3)">— ${vNeutral} Neutral</span>` : ''}
       </div>
     </div>` : '';
 
