@@ -5,7 +5,7 @@ const CONFIG_KEY = 'aic_config_v1';
 
 const DEFAULT_CONFIG = {
   apiKey:    '',
-  model:     'claude-sonnet-4-6',
+  model:     'claude-sonnet-5-5',
   webSearch: true,
   language:  'auto',
   notionToken:   '',
@@ -16,9 +16,12 @@ const DEFAULT_CONFIG = {
 
 // Deprecated model IDs → replacement
 const MODEL_MIGRATIONS = {
-  'claude-sonnet-4-5': 'claude-sonnet-4-6',
-  'claude-opus-4-5':   'claude-opus-4-8',
-  'claude-haiku-4-5-20251001': 'claude-haiku-4-5',
+  'claude-sonnet-4-5': 'claude-sonnet-5-5',
+  'claude-sonnet-4-6': 'claude-sonnet-5-5',
+  'claude-opus-4-5':   'claude-opus-5-5',
+  'claude-opus-4-8':   'claude-opus-5-5',
+  'claude-haiku-4-5':  'claude-haiku-5-5',
+  'claude-haiku-4-5-20251001': 'claude-haiku-5-5',
 };
 
 function loadConfig() {

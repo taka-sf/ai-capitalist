@@ -129,9 +129,10 @@
             <div class="field">
               <label class="field-label">Model</label>
               <select id="model">
-                <option value="claude-sonnet-4-6">claude-sonnet-4-6 (Recommended)</option>
-                <option value="claude-opus-4-8">claude-opus-4-8 (Higher quality, slower)</option>
-                <option value="claude-haiku-4-5">claude-haiku-4-5 (Fast, lower quality)</option>
+                <option value="claude-sonnet-5-5">claude-sonnet-5-5 (Recommended)</option>
+                <option value="claude-opus-5-5">claude-opus-5-5 (Higher quality, slower)</option>
+                <option value="claude-fable-5-1">claude-fable-5-1 (Top tier, slowest / most expensive)</option>
+                <option value="claude-haiku-5-5">claude-haiku-5-5 (Fast, lower quality)</option>
               </select>
             </div>
             <div class="field">
@@ -300,7 +301,7 @@ async function init() {
 
   const cfg = loadConfig();
   document.getElementById('apiKey').value = cfg.apiKey || '';
-  document.getElementById('model').value = cfg.model || 'claude-sonnet-4-6';
+  document.getElementById('model').value = cfg.model || 'claude-sonnet-5-5';
   document.getElementById('language').value = cfg.language || 'auto';
   document.getElementById('gasUrl').value = cfg.gasUrl || '';
   document.getElementById('notionToken').value = cfg.notionToken || '';
@@ -319,7 +320,7 @@ async function init() {
       if (res?.ok && res.config) {
         const merged = { ...cfg, ...res.config, apiKey: '' }; // never overwrite API key from cloud
         saveConfig(merged);
-        document.getElementById('model').value = merged.model || 'claude-sonnet-4-6';
+        document.getElementById('model').value = merged.model || 'claude-sonnet-5-5';
         document.getElementById('language').value = merged.language || 'auto';
         setToggle('webSearch', merged.webSearch !== false);
         toast('クラウドから設定を読み込みました。APIキーを入力してください。');
